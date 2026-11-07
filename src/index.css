@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Source Sans 3', 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  --color-ink: #0b0f17;
+  --color-ink-2: #121826;
+  --color-panel: rgba(15, 21, 34, 0.78);
+  --color-panel-light: rgba(255, 252, 247, 0.86);
+  --color-line: rgba(232, 238, 247, 0.1);
+  --color-accent: #f0b429;
+  --color-stable: #38bdf8;
+  --color-unstable: #fb7185;
+  --color-center: #c4b5fd;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-ink);
+  color: #e8eef7;
+  overflow: hidden;
+}
+
+body[data-theme='light'] {
+  background: #f4f0e6;
+  color: #1c1915;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+.glass {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px);
+}
+
+body[data-theme='light'] .glass {
+  background: var(--color-panel-light);
+  border-color: rgba(28, 25, 21, 0.08);
+  box-shadow: 0 16px 40px rgba(70, 50, 20, 0.08);
+}
+
+.katex {
+  font-size: 1.02em;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
