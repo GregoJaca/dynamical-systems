@@ -7,6 +7,15 @@ import type {
 } from '../core/types';
 import { integrateRK45 } from '../numeric/rk45';
 
+function coordText(coords: number[]): string {
+  const part = (value: number) => {
+    if (!Number.isFinite(value)) return '?';
+    if (Math.abs(value - Math.round(value)) < 1e-6) return String(Math.round(value));
+    return String(Number(value.toPrecision(3)));
+  };
+  return `(${coords.map(part).join(', ')})`;
+}
+
 function limitId(result: Rk45Result, direction: 'forward' | 'backward'): string {
   if (result.equilibriumId) return result.equilibriumId;
   if (result.status === 'periodicOrbitDetected') return 'limit_cycle';
@@ -140,8 +149,8 @@ export function computeLinearStreamlines(
       forwardLimitId: eq.id,
       backwardLimitId: 'unresolved',
       category: 'characteristic_orbit',
-      reasonTag: `Linearization at ${eq.id}`,
-      formulaOrDescriptionLatex: `\\dot{\\xi} = J(${eq.id})\\,\\xi`,
+      reasonTag: `Linearization at ${coordText(eq.coords)}`,
+      formulaOrDescriptionLatex: `\\dot{\\xi} = J${coordText(eq.coords)}\\,\\xi`,
     });
   });
   return segments;

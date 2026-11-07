@@ -1,4 +1,5 @@
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
+import { matchesFocus } from '../core/focus';
 import type { ViewportBounds } from '../core/types';
 
 /** Axis-aligned phase-space box. Math Z is padded when the system is planar so the cage has volume. */
@@ -318,13 +319,13 @@ export function mathToFlatThree(vertices: readonly number[]): Float32Array {
 }
 
 export function emphasisOpacity(id: string, hoverId: string | null, selectedId: string | null, base: number): number {
-  if (hoverId) return id === hoverId ? base : Math.min(base, 0.2);
-  if (selectedId && id !== selectedId) return Math.min(base, 0.34);
+  if (hoverId) return matchesFocus(id, hoverId) ? base : Math.min(base, 0.2);
+  if (selectedId && !matchesFocus(id, selectedId)) return Math.min(base, 0.34);
   return base;
 }
 
 export function emphasisWidth(id: string, hoverId: string | null, selectedId: string | null, base: number): number {
-  if (id === hoverId || id === selectedId) return Math.max(base * 2.1, base + 1.4);
+  if (matchesFocus(id, hoverId) || id === selectedId) return Math.max(base * 2.1, base + 1.4);
   return base;
 }
 

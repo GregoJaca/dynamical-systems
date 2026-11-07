@@ -20,7 +20,9 @@ export function generateStreamlines(
 
   for (const branch of manifolds) {
     if (branch.kind === 'Wc' || branch.points.length < 2) continue;
-    const segment = fromPoints(branch.points, compiled, equilibria, 'separatrix', `${branch.kind} separatrix of ${branch.equilibriumId}`);
+    const home = equilibria.find((eq) => eq.id === branch.equilibriumId);
+    const segment = fromPoints(branch.points, compiled, equilibria, 'separatrix', `${branch.kind} separatrix of ${home ? coordText(home.coords) : branch.equilibriumId}`);
+    segment.id = `separatrix-${curves.length}`;
     curves.push(segment);
     for (const point of segment.points) grid.mark(point[0] ?? 0, point[1] ?? 0);
   }
@@ -34,7 +36,7 @@ export function generateStreamlines(
         queue.push({
           x: (eq.coords[0] ?? 0) + scale * Math.cos(angle),
           y: (eq.coords[1] ?? 0) + scale * Math.sin(angle),
-          reason: `Characteristic orbit near ${eq.id}`,
+          reason: `Characteristic orbit near ${coordText(eq.coords)}`,
         });
       }
     }
@@ -70,6 +72,7 @@ export function generateStreamlines(
       forward.limitId,
       backward.limitId,
     );
+    segment.id = `orbit-${curves.length}`;
     curves.push(segment);
     for (let index = 0; index < points.length; index += 4) {
       const point = points[index]!;
@@ -181,6 +184,15 @@ function fromPoints(
     reasonTag: reason,
     formulaOrDescriptionLatex: reason,
   };
+}
+
+function coordText(coords: number[]): string {
+  const part = (value: number) => {
+    if (!Number.isFinite(value)) return '?';
+    if (Math.abs(value - Math.round(value)) < 1e-6) return String(Math.round(value));
+    return String(Number(value.toPrecision(3)));
+  };
+  return `(${coords.map(part).join(', ')})`;
 }
 
 function nearestLimit(point: number[], equilibria: EquilibriumAnalysis[]): string {

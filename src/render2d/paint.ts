@@ -1,3 +1,4 @@
+import { matchesFocus } from '../core/focus';
 import type { BasinField, CompareMode, EquilibriumAnalysis, LayerVisibility, NumericAnalysis, StreamlineSegment, ThemeMode } from '../core/types';
 import { PALETTE, basinColor } from '../core/palette';
 import type { ViewRect } from './geometry';
@@ -30,27 +31,21 @@ export function drawGrid(ctx: CanvasRenderingContext2D, view: ViewRect, theme: T
   clipView(ctx, view);
   ctx.lineWidth = 1;
   ctx.strokeStyle = palette.grid;
-  ctx.fillStyle = palette.muted;
-  ctx.font = '11px "Source Sans 3", "Segoe UI", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
   for (const tick of niceTicks(view.xMin, view.xMax, piX)) {
     const [sx] = worldToScreen(view, tick.value, 0);
+    if (sx < view.left - 1 || sx > view.left + view.width + 1) continue;
     ctx.beginPath();
     ctx.moveTo(sx, view.top);
     ctx.lineTo(sx, view.top + view.height);
     ctx.stroke();
-    ctx.fillText(tick.label, sx, view.top + view.height - 16);
   }
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
   for (const tick of niceTicks(view.yMin, view.yMax, piY)) {
     const [, sy] = worldToScreen(view, 0, tick.value);
+    if (sy < view.top - 1 || sy > view.top + view.height + 1) continue;
     ctx.beginPath();
     ctx.moveTo(view.left, sy);
     ctx.lineTo(view.left + view.width, sy);
     ctx.stroke();
-    ctx.fillText(tick.label, view.left + 28, sy);
   }
   ctx.strokeStyle = palette.axis;
   ctx.lineWidth = 1.25;
@@ -67,6 +62,27 @@ export function drawGrid(ctx: CanvasRenderingContext2D, view: ViewRect, theme: T
     ctx.moveTo(sx, view.top);
     ctx.lineTo(sx, view.top + view.height);
     ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = palette.muted;
+  ctx.font = '11px "Source Sans 3", "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const tick of niceTicks(view.xMin, view.xMax, piX)) {
+    const [sx] = worldToScreen(view, tick.value, 0);
+    if (sx < view.left + 10 || sx > view.left + view.width - 10) continue;
+    ctx.fillText(tick.label, sx, view.top + view.height + 5);
+  }
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  let lastLabelY = Number.NEGATIVE_INFINITY;
+  for (const tick of niceTicks(view.yMin, view.yMax, piY)) {
+    const [, sy] = worldToScreen(view, 0, tick.value);
+    if (sy < view.top + 8 || sy > view.top + view.height - 8) continue;
+    if (Math.abs(sy - lastLabelY) < 14) continue;
+    lastLabelY = sy;
+    ctx.fillText(tick.label, view.left - 8, sy);
   }
   ctx.restore();
 }
@@ -241,21 +257,36 @@ export function drawVectorArrows(
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 1;
-  ctx.globalAlpha = 0.55;
+  ctx.globalAlpha = 0.72;
+  const scaleX = view.width / Math.max(1e-9, view.xMax - view.xMin);
+  const scaleY = view.height / Math.max(1e-9, view.yMax - view.yMin);
   for (const arrow of arrows) {
     const mag = Math.hypot(arrow.fx, arrow.fy);
     if (!Number.isFinite(mag) || mag < 1e-9) continue;
+    const dx = arrow.fx * scaleX;
+    const dy = -arrow.fy * scaleY;
+    const screenMag = Math.hypot(dx, dy);
+    if (screenMag < 1e-6) continue;
+    const ux = dx / screenMag;
+    const uy = dy / screenMag;
+    const length = 9 + 8 * Math.tanh(mag * Math.hypot(scaleX, scaleY) * 0.06);
     const [sx, sy] = worldToScreen(view, arrow.x, arrow.y);
-    const scale = view.width / Math.max(1e-9, view.xMax - view.xMin);
-    const screenAngle = Math.atan2(-arrow.fy, arrow.fx);
-    const length = 7 + 8 * Math.tanh(mag * scale * 0.15);
+    const tipX = sx + ux * length;
+    const tipY = sy + uy * length;
     ctx.beginPath();
     ctx.moveTo(sx, sy);
-    ctx.lineTo(sx + length * Math.cos(screenAngle), sy + length * Math.sin(screenAngle));
+    ctx.lineTo(tipX - ux * 5, tipY - uy * 5);
     ctx.stroke();
+    ctx.save();
+    ctx.translate(tipX, tipY);
+    ctx.rotate(Math.atan2(uy, ux));
     ctx.beginPath();
-    ctx.arc(sx, sy, 1.2, 0, Math.PI * 2);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-7, 2.7);
+    ctx.lineTo(-7, -2.7);
+    ctx.closePath();
     ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -270,7 +301,7 @@ export function drawParticles(
   clipView(ctx, view);
   ctx.lineCap = 'round';
   for (const particle of particles) {
-    const dim = focusId != null && particle.curveId !== focusId;
+    const dim = focusId != null && !matchesFocus(particle.curveId, focusId);
     const head = particle.trail[particle.trail.length - 1];
     if (!head) continue;
     for (let i = 1; i < particle.trail.length; i += 1) {
@@ -354,12 +385,12 @@ export function drawDisk(
 }
 
 export function curveAlpha(id: string, focusId: string | null, base: number): number {
-  if (!focusId || focusId === id) return base;
+  if (!focusId || matchesFocus(id, focusId)) return base;
   return Math.min(base, 0.2);
 }
 
 export function curveWidth(id: string, focusId: string | null, selectedId: string | null, base: number): number {
-  if (focusId === id) return base + 1.8;
+  if (matchesFocus(id, focusId)) return base + 1.8;
   if (selectedId === id) return base + 0.9;
   return base;
 }
@@ -437,7 +468,15 @@ export function paintPhaseFrame(frame: PhaseFrame): void {
     }
     if (frame.layers.hamiltonianContours && frame.hamiltonian) {
       for (const path of frame.hamiltonian) {
-        strokeWorldPath(ctx, view, path, palette.muted, 1, 0.7, true);
+        strokeWorldPath(
+          ctx,
+          view,
+          path,
+          palette.muted,
+          curveWidth('hamiltonian', frame.focusId, frame.selectedId, 1),
+          curveAlpha('hamiltonian', frame.focusId, 0.7),
+          true,
+        );
       }
     }
     if (frame.layers.vectorField && frame.arrows) drawVectorArrows(ctx, view, frame.arrows, palette.muted);

@@ -29,10 +29,9 @@ export function EquilibriaPanel() {
         return (
           <details key={eq.id} open={open} className="rounded-2xl border border-slate-400/25 px-3 py-2">
             <summary className="cursor-pointer text-sm" onClick={() => selectEquilibrium(eq.id)}>
-              {eq.id} · {prettyLabel(eq.classification2D ?? eq.classification3D ?? eq.stability)}
+              {coordList(eq.coords, eq.coordsExactLatex)} · {prettyLabel(eq.classification2D ?? eq.classification3D ?? eq.stability)}
             </summary>
             <div className="mt-2 space-y-2 text-sm">
-              <Katex tex={coordList(eq.coords, eq.coordsExactLatex)} display />
               {eq.familyFormulaLatex && <Katex tex={eq.familyFormulaLatex} display />}
               <Katex tex={`J = ${eq.jacobianExactLatex || matrixLatex(eq.jacobianNumeric)}`} display />
               <p>
@@ -58,7 +57,7 @@ export function EquilibriaPanel() {
               <div className="flex flex-wrap gap-1">
                 <Badge tone={eq.isHyperbolic ? 'good' : 'gold'}>{eq.isHyperbolic ? 'Hyperbolic' : 'Nonhyperbolic'}</Badge>
                 <Badge>{prettyLabel(eq.stability)}</Badge>
-                <Badge>{eq.hartmanGrobmanApplies ? 'Hartman–Grobman' : 'Linearization inconclusive'}</Badge>
+                {eq.hartmanGrobmanApplies && <Badge>Hartman–Grobman</Badge>}
               </div>
               {eq.stabilityReasonLatex && <RichText text={eq.stabilityReasonLatex} />}
               {eq.subspaces.map((space) => (
@@ -77,7 +76,6 @@ export function EquilibriaPanel() {
           </details>
         );
       })}
-      {analysis.equilibria.length === 0 && <p className="text-sm opacity-70">Equilibria appear here as soon as the numeric pass finds them.</p>}
     </div>
   );
 }

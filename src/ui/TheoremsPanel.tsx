@@ -37,7 +37,6 @@ export function TheoremsPanel() {
           <RichText text={theorem.applicationToSystemLatex} />
         </article>
       ))}
-      {theorems.length === 0 && <p className="text-sm opacity-70">Applicable Perko theorems are attached when the symbolic pass recognizes them. The numeric portrait still has a worked write-up below.</p>}
       {sections
         .filter((section) => section.title !== 'Theorems')
         .map((section) => (
@@ -45,7 +44,7 @@ export function TheoremsPanel() {
           <h4 className="text-[11px] uppercase tracking-[0.16em] opacity-60">{section.title}</h4>
           {section.latex
             .split(/\n+/)
-            .filter((line) => line.trim().length > 0)
+            .filter((line) => line.trim().length > 0 && !/^\s*(No |\\text\{No )/i.test(line))
             .map((line, index) => (
               <RichText key={`${section.title}-${index}`} text={line} />
             ))}

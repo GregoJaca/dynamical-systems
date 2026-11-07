@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { matchesFocus } from '../core/focus';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { isBareFormula, looksLikeProse, readableProse, splitMath, stripDelimiters } from '../ui/Katex';
 import type {
   CompiledSystem,
   LayerVisibility,
@@ -54,15 +56,20 @@ function parameterRecord(spec: SystemSpec, compiled: CompiledSystem | null): Rec
 }
 
 function layoutViews(width: number, height: number, viewport: ViewportBounds, split: boolean): { main: ViewRect; linear: ViewRect | null } {
-  if (split && width > 140) {
+  const padL = 54;
+  const padB = 28;
+  const padT = 12;
+  const padR = 14;
+  const plotH = Math.max(1, height - padT - padB);
+  if (split && width > 180) {
     const gap = 18;
-    const pane = (width - gap) / 2;
+    const pane = Math.max(1, (width - gap - padL - padR) / 2);
     return {
-      main: makeView(viewport, 0, 0, pane, height),
-      linear: makeView(viewport, pane + gap, 0, pane, height),
+      main: makeView(viewport, padL, padT, pane, plotH),
+      linear: makeView(viewport, padL + pane + gap, padT, pane, plotH),
     };
   }
-  return { main: makeView(viewport, 0, 0, width, height), linear: null };
+  return { main: makeView(viewport, padL, padT, Math.max(1, width - padL - padR), plotH), linear: null };
 }
 
 function collectCurves(analysis: NumericAnalysis, layers: LayerVisibility, userOrbits: StreamlineSegment[]) {
@@ -110,12 +117,41 @@ function sampleArrows(
   return arrows;
 }
 
-function renderFormula(source: string): string {
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char] ?? char);
+}
+
+function renderMath(tex: string, display: boolean): string {
+  const source = stripDelimiters(tex).tex;
+  if (!source || looksLikeProse(source)) return escapeHtml(readableProse(source));
   try {
-    return katex.renderToString(source, { throwOnError: false, displayMode: false });
+    const html = katex.renderToString(source, { throwOnError: true, displayMode: display, strict: 'ignore' });
+    if (html.includes('katex-error')) return escapeHtml(readableProse(source));
+    return html;
   } catch {
-    return source;
+    return escapeHtml(readableProse(source));
   }
+}
+
+function renderPiece(part: string): string {
+  const pieces = splitMath(part);
+  const mathPieces = pieces.filter((piece) => piece.math);
+  const prosePieces = pieces.filter((piece) => !piece.math && piece.value.trim());
+  if (mathPieces.length === 0) {
+    if (isBareFormula(part)) return renderMath(part, false);
+    return escapeHtml(readableProse(part));
+  }
+  if (prosePieces.length === 0 && mathPieces.length === 1) return renderMath(mathPieces[0]!.value, mathPieces[0]!.display);
+  return pieces.map((piece) => (piece.math ? renderMath(piece.value, piece.display) : escapeHtml(piece.value))).join('');
+}
+
+function renderFormula(source: string): string {
+  return source
+    .split(/\\\\/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map(renderPiece)
+    .join('<br/>');
 }
 
 export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
@@ -314,6 +350,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const current = propsRef.current;
+      if (!wrap.isConnected) return;
       const rect = wrap.getBoundingClientRect();
       const layout = layoutViews(
         sizeRef.current.w,
@@ -508,7 +545,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
                 const [x2, y2] = worldToScreen(view, clipped[2], clipped[3]);
                 const id = `${equilibrium.id}:${subspace.kind}`;
                 const color = subspace.kind === 'Es' ? palette.es : subspace.kind === 'Eu' ? palette.eu : palette.ec;
-                const focused = props.hoverObjectId === id || props.hoverObjectId === equilibrium.id;
+                const focused = matchesFocus(id, props.hoverObjectId) || props.hoverObjectId === equilibrium.id;
                 const dim = props.hoverObjectId != null && !focused;
                 return (
                   <line
@@ -538,8 +575,8 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
                 equilibrium.classification2D ?? equilibrium.classification3D,
                 props.theme,
               );
-              const focused = props.hoverObjectId === equilibrium.id || props.selectedObjectId === equilibrium.id;
-              const dim = props.hoverObjectId != null && props.hoverObjectId !== equilibrium.id;
+              const focused = matchesFocus(equilibrium.id, props.hoverObjectId) || props.selectedObjectId === equilibrium.id;
+              const dim = props.hoverObjectId != null && !matchesFocus(equilibrium.id, props.hoverObjectId);
               const label = (equilibrium.classification2D ?? equilibrium.stability).replaceAll('_', ' ');
               const showLabel = focused || props.analysis.equilibria.length <= 8;
               return (

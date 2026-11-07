@@ -178,12 +178,13 @@ export function TraceDetMinimap(props: TraceDetMinimapProps) {
 
   const onWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
     event.preventDefault();
+    const rect = event.currentTarget?.getBoundingClientRect();
+    if (!rect || rect.width < 1 || rect.height < 1) return;
     const factor = Math.exp(Math.max(-120, Math.min(120, event.deltaY)) * 0.0015);
+    const px = ((event.clientX - rect.left) / rect.width) * VIEW_W;
+    const py = ((event.clientY - rect.top) / rect.height) * VIEW_H;
     setManual((current) => {
       const base = current ?? auto;
-      const rect = event.currentTarget.getBoundingClientRect();
-      const px = ((event.clientX - rect.left) / rect.width) * VIEW_W;
-      const py = ((event.clientY - rect.top) / rect.height) * VIEW_H;
       const tau = base.tMin + ((px - plot.left) / plot.width) * (base.tMax - base.tMin);
       const delta = base.dMax - ((py - plot.top) / plot.height) * (base.dMax - base.dMin);
       return {

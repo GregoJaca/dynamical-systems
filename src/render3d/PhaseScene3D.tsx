@@ -611,6 +611,7 @@ function PointerPicker({
       const dy = event.clientY - down.y;
       down = null;
       if (dx * dx + dy * dy > 25) return;
+      if (!element.isConnected) return;
       const rect = element.getBoundingClientRect();
       if (rect.width < 1 || rect.height < 1) return;
       ndc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
