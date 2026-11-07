@@ -259,9 +259,6 @@ export function AppShell() {
         {view === 'system' && (
           <div className="system-page">
             <h1>Nonlinear dynamical systems</h1>
-            <p className="lede">
-              Write a system here, or open Examples in the bar above. The name on the left of each row is the variable. Clearing an equation keeps the variable; Remove deletes it.
-            </p>
             <EquationPanel />
           </div>
         )}

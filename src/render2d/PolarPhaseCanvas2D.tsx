@@ -5,6 +5,7 @@ import { matchesFocus } from '../core/focus';
 import { screenToWorld, worldToScreen, type ViewRect } from './geometry';
 import { type Rhs } from './integrate';
 import { spawnParticles, stepParticles, type SimParticle } from './particles';
+import { lyapunovCurvesAvailable } from '../core/layers';
 import { levelContours } from './contours';
 import { cartesianToPolar, seedPolarOrbits } from './polarFlow';
 import { compilePolarField, compileScalarField } from './scalars';
@@ -135,7 +136,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
   }, [curves.field, props.compiled, bounds]);
 
   const lyapunovLevels = useMemo(() => {
-    if (!props.layers.lyapunov) return [];
+    if (!props.layers.lyapunov || !lyapunovCurvesAvailable(props.analysis)) return [];
     const field = compileScalarField(
       props.analysis.global.lyapunov?.vExpr,
       props.spec.stateVars,
@@ -147,6 +148,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     return levelContours(field, view.xMin, view.xMax, view.yMin, view.yMax);
   }, [
     props.layers.lyapunov,
+    props.analysis.global.lyapunov?.classification,
     props.analysis.global.lyapunov?.vExpr,
     props.analysis.viewport,
     props.analysis.revision,

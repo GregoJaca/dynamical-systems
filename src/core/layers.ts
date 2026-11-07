@@ -35,9 +35,7 @@ export function directScene(analysis: NumericAnalysis, current: LayerVisibility)
   if (analysis.global.isHamiltonian) {
     next.hamiltonianContours = true;
   }
-  if (analysis.global.lyapunov && analysis.global.lyapunov.classification !== 'indefinite') {
-    next.lyapunov = true;
-  }
+  if (!lyapunovCurvesAvailable(analysis)) next.lyapunov = false;
   if (analysis.limitCycles.length > 0) {
     next.limitCycles = true;
   }
@@ -46,4 +44,10 @@ export function directScene(analysis: NumericAnalysis, current: LayerVisibility)
     next.linearSubspaces = true;
   }
   return next;
+}
+
+/** Level curves are drawn only for a proved strict or weak Lyapunov function, and they start hidden. */
+export function lyapunovCurvesAvailable(analysis: NumericAnalysis): boolean {
+  const kind = analysis.global.lyapunov?.classification;
+  return (kind === 'strict_lyapunov' || kind === 'weak_lyapunov_lasalle') && Boolean(analysis.global.lyapunov?.vExpr);
 }

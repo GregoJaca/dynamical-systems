@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { matchesFocus } from '../core/focus';
+import { lyapunovCurvesAvailable } from '../core/layers';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { isBareFormula, looksLikeProse, readableProse, splitMath, stripDelimiters } from '../ui/Katex';
@@ -206,12 +207,12 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
   const lyapEval = useMemo(
     () =>
       compileScalarField(
-        props.analysis.global.lyapunov?.vExpr,
+        lyapunovCurvesAvailable(props.analysis) ? props.analysis.global.lyapunov?.vExpr : undefined,
         props.spec.stateVars,
         parameterRecord(props.spec, props.compiled),
         props.spec.independentVar,
       ),
-    [props.analysis.global.lyapunov?.vExpr, props.spec.revision, props.spec.independentVar, paramKey, props.spec.stateVars],
+    [props.analysis.global.lyapunov?.vExpr, props.analysis.global.lyapunov?.classification, props.spec.revision, props.spec.independentVar, paramKey, props.spec.stateVars],
   );
   const hamEval = useMemo(
     () =>
@@ -661,21 +662,27 @@ function refreshCaches(
     cache.basin = basinStamp && field ? rasterBasins(field) : null;
   }
   const lyapKey = props.layers.lyapunov && lyapEval ? `${viewportKey(props.analysis.viewport)}:${props.analysis.revision}` : '';
-  if (lyapKey && lyapEval && cache.lyapKey !== lyapKey) {
+  if (lyapKey && lyapEval && (cache.lyapKey !== lyapKey || cache.lyap == null)) {
     cache.lyapKey = lyapKey;
     cache.lyapAt = now;
     cache.lyap = levelContours(lyapEval, view.xMin, view.xMax, view.yMin, view.yMax);
   }
-  if (!lyapKey) cache.lyap = null;
-  const hamKey = props.layers.hamiltonianContours && hamEval ? lyapKey || `${viewportKey(props.analysis.viewport)}:${props.analysis.revision}` : '';
-  if (hamKey && cache.hamKey !== hamKey && (cache.ham == null || now - cache.hamAt > 120)) {
+  if (!lyapKey) {
+    cache.lyap = null;
+    cache.lyapKey = '';
+  }
+  const hamKey = props.layers.hamiltonianContours && hamEval ? `${viewportKey(props.analysis.viewport)}:${props.analysis.revision}` : '';
+  if (hamKey && hamEval && (cache.hamKey !== hamKey || cache.ham == null)) {
     cache.hamKey = hamKey;
     cache.hamAt = now;
-    cache.ham = hamEval ? hamiltonianContours(hamEval, view) : null;
+    cache.ham = hamiltonianContours(hamEval, view);
   }
-  if (!hamKey) cache.ham = null;
+  if (!hamKey) {
+    cache.ham = null;
+    cache.hamKey = '';
+  }
   const arrowKey = props.layers.vectorField && props.compiled ? `${viewportKey(props.analysis.viewport)}:${props.spec.revision}` : '';
-  if (arrowKey && props.compiled && cache.arrowKey !== arrowKey && (cache.arrows == null || now - cache.arrowAt > 70)) {
+  if (arrowKey && props.compiled && (cache.arrowKey !== arrowKey || cache.arrows == null)) {
     const system = props.compiled;
     cache.arrowKey = arrowKey;
     cache.arrowAt = now;
@@ -688,11 +695,14 @@ function refreshCaches(
       }
     }, view, 16, 12);
   }
-  if (!arrowKey) cache.arrows = null;
+  if (!arrowKey) {
+    cache.arrows = null;
+    cache.arrowKey = '';
+  }
   const equilibrium = props.analysis.equilibria.find((item) => item.id === props.linearization.equilibriumId);
   const linearKey =
     linearView && equilibrium && props.layers.vectorField ? `${equilibrium.id}:${viewportKey(props.analysis.viewport)}` : '';
-  if (linearKey && equilibrium && linearView && cache.linearArrowKey !== linearKey) {
+  if (linearKey && equilibrium && linearView && (cache.linearArrowKey !== linearKey || cache.linearArrows == null)) {
     const field = linearField(equilibrium);
     cache.linearArrowKey = linearKey;
     cache.linearArrows = sampleArrows((x, y) => {
@@ -700,7 +710,10 @@ function refreshCaches(
       return [value[0] ?? 0, value[1] ?? 0];
     }, linearView, 14, 11);
   }
-  if (!linearKey) cache.linearArrows = null;
+  if (!linearKey) {
+    cache.linearArrows = null;
+    cache.linearArrowKey = '';
+  }
 }
 
 function hamiltonianContours(evaluate: (x: number, y: number) => number, view: ViewRect): number[][][] {

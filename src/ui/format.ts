@@ -1,4 +1,5 @@
 import type { ComplexEigenvalue } from '../core/types';
+import { latexNumber } from '../numeric/algebra';
 
 export function rationalLabel(value: number): string {
   if (!Number.isFinite(value)) return '—';
@@ -41,11 +42,11 @@ export function complexLatex(lambda: Pick<ComplexEigenvalue, 're' | 'im' | 'exac
 }
 
 export function vectorLatex(vector: number[]): string {
-  return `\\begin{pmatrix} ${vector.map((entry) => rationalLabel(entry)).join(' \\\\ ')} \\end{pmatrix}`;
+  return `\\begin{pmatrix} ${vector.map((entry) => latexNumber(entry)).join(' \\\\ ')} \\end{pmatrix}`;
 }
 
 export function matrixLatex(matrix: number[][]): string {
-  const body = matrix.map((row) => row.map((entry) => rationalLabel(entry)).join(' & ')).join(' \\\\ ');
+  const body = matrix.map((row) => row.map((entry) => latexNumber(entry)).join(' & ')).join(' \\\\ ');
   return `\\begin{pmatrix} ${body} \\end{pmatrix}`;
 }
 

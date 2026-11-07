@@ -93,7 +93,7 @@ export function EquationPanel() {
 
   const parameters = Object.values(spec.parameters);
   const missingEquation = draftRows.some((row) => row.trim().length === 0) || draftVars.some((name) => name.trim().length === 0);
-  const status = parseError ? parseError : missingEquation ? 'Write each right-hand side. Remove deletes a variable.' : numericStatus === 'running' ? 'Computing the portrait…' : spec.isLinear ? 'Linear' : 'Nonlinear';
+  const status = parseError ? parseError : missingEquation ? 'Write each right-hand side. Remove deletes a variable.' : numericStatus === 'running' ? 'Computing the portrait…' : '';
 
   return (
     <form
@@ -179,7 +179,7 @@ export function EquationPanel() {
           ))}
         </div>
       )}
-      <p className={parseError ? 'status error' : 'status'}>{status}</p>
+      {status ? <p className={parseError ? 'status error' : 'status'}>{status}</p> : null}
 
       {parameters.length > 0 && (
         <div className="parameters">

@@ -3,6 +3,7 @@
  * sign tests, and the antiderivatives needed for Hamiltonians and Lyapunov functions.
  */
 
+import { EigenvalueDecomposition, Matrix } from 'ml-matrix';
 import { derivative, parse, simplify, type MathNode } from 'mathjs';
 
 /** mathjs nodes are not a discriminated union, so reads go through this view. */
@@ -77,14 +78,63 @@ export function rationalize(value: number, maxDen = 12): { n: number; d: number 
 export function latexNumber(value: number): string {
   if (Math.abs(value) < 1e-10) return '0';
   const rational = rationalize(value, 12);
-  if (!rational) {
-    const text = Number(value.toPrecision(6)).toString();
-    return text.startsWith('-') ? `-${text.slice(1)}` : text;
+  if (rational) return fractionLatex(rational.n, rational.d);
+  const radical = radicalLatex(value);
+  if (radical) return radical;
+  const text = Number(value.toPrecision(6)).toString();
+  return text.startsWith('-') ? `-${text.slice(1)}` : text;
+}
+
+function fractionLatex(numerator: number, denominator: number): string {
+  if (denominator < 0) return fractionLatex(-numerator, -denominator);
+  const shared = gcd(Math.abs(numerator), denominator);
+  const n = numerator / shared;
+  const d = denominator / shared;
+  if (d === 1) return String(n);
+  const sign = n < 0 ? '-' : '';
+  return `${sign}\\frac{${Math.abs(n)}}{${d}}`;
+}
+
+/** ±√(p/q) when the square of the value is a simple rational. */
+function radicalLatex(value: number): string | null {
+  const square = rationalize(value * value, 24);
+  if (!square || square.n <= 0) return null;
+  const sign = value < 0 ? '-' : '';
+  const shared = gcd(square.n, square.d);
+  const n = square.n / shared;
+  const d = square.d / shared;
+  const top = pullSquares(n * d);
+  const bottom = d;
+  const common = gcd(top.outside, bottom);
+  const outside = top.outside / common;
+  const den = bottom / common;
+  if (top.inside === 0) return '0';
+  const body = top.inside === 1 ? String(outside) : outside === 1 ? `\\sqrt{${top.inside}}` : `${outside}\\sqrt{${top.inside}}`;
+  if (den === 1) return `${sign}${body}`;
+  return `${sign}\\frac{${body}}{${den}}`;
+}
+
+function pullSquares(value: number): { outside: number; inside: number } {
+  let outside = 1;
+  let inside = value;
+  for (let prime = 2; prime * prime <= inside; prime += 1) {
+    while (inside % (prime * prime) === 0) {
+      outside *= prime;
+      inside /= prime * prime;
+    }
   }
-  const sign = rational.n < 0 ? '-' : '';
-  const num = Math.abs(rational.n);
-  if (rational.d === 1) return `${sign}${num}`;
-  return `${sign}\\frac{${num}}{${rational.d}}`;
+  return { outside, inside };
+}
+
+function gcd(a: number, b: number): number {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
 }
 
 export function dependsOn(expr: string, variable: string): boolean {
@@ -246,21 +296,28 @@ export function polyIsZero(poly: Poly): boolean {
 
 export type SignClass = 'positive' | 'negative' | 'nonpositive' | 'nonnegative' | 'zero' | 'indefinite' | 'unknown';
 
-/** Sign of a polynomial on R^n. Even-powered same-sign polynomials are semi-definite. */
+/** Sign of a polynomial on R^n. A cross term such as xy is not automatically indefinite. */
 export function polynomialSign(poly: Poly, dim: number): SignClass {
   if (polyIsZero(poly)) return 'zero';
+  const terms: Array<{ exps: number[]; coeff: number }> = [];
+  for (const [key, coeff] of poly) {
+    if (Math.abs(coeff) < 1e-10) continue;
+    terms.push({ exps: parseKey(key, dim), coeff });
+  }
+  if (terms.length === 0) return 'zero';
+  if (terms.some((term) => term.exps.reduce((sum, exp) => sum + exp, 0) % 2 === 1)) return 'indefinite';
+  const degree = Math.max(...terms.map((term) => term.exps.reduce((sum, exp) => sum + exp, 0)));
+  if (degree <= 2) return quadraticFormSign(terms, dim);
+  if (terms.some((term) => term.exps.some((exp) => exp % 2 === 1))) return 'unknown';
   let sign = 0;
   let constant = 0;
   const pure = Array(dim).fill(false);
-  for (const [key, coeff] of poly) {
-    if (Math.abs(coeff) < 1e-10) continue;
-    const exps = parseKey(key, dim);
-    if (exps.some((exp) => exp % 2 === 1)) return 'indefinite';
-    const sg = Math.sign(coeff);
+  for (const term of terms) {
+    const sg = Math.sign(term.coeff);
     if (sign === 0) sign = sg;
     else if (sg !== sign) return 'indefinite';
-    const support = exps.map((exp, index) => (exp > 0 ? index : -1)).filter((index) => index >= 0);
-    if (support.length === 0) constant += coeff;
+    const support = term.exps.map((exp, index) => (exp > 0 ? index : -1)).filter((index) => index >= 0);
+    if (support.length === 0) constant += term.coeff;
     if (support.length === 1) pure[support[0]!] = true;
   }
   if (sign === 0) return 'zero';
@@ -268,6 +325,47 @@ export function polynomialSign(poly: Poly, dim: number): SignClass {
   const definite = pure.every(Boolean);
   if (sign > 0) return definite ? 'positive' : 'nonnegative';
   return definite ? 'negative' : 'nonpositive';
+}
+
+function quadraticFormSign(terms: Array<{ exps: number[]; coeff: number }>, dim: number): SignClass {
+  const matrix = Array.from({ length: dim }, () => Array(dim).fill(0));
+  let constant = 0;
+  for (const term of terms) {
+    const support = term.exps.map((exp, index) => (exp > 0 ? index : -1)).filter((index) => index >= 0);
+    if (support.length === 0) constant += term.coeff;
+    else if (support.length === 1 && term.exps[support[0]!] === 2) matrix[support[0]!]![support[0]!] += term.coeff;
+    else if (support.length === 2) {
+      const [i, j] = support;
+      matrix[i!]![j!] += term.coeff / 2;
+      matrix[j!]![i!] += term.coeff / 2;
+    } else return 'unknown';
+  }
+  let eigenvalues: number[] = [];
+  try {
+    eigenvalues = new EigenvalueDecomposition(new Matrix(matrix)).realEigenvalues;
+  } catch {
+    return 'unknown';
+  }
+  const tol = 1e-8;
+  const form = eigenvalueSign(eigenvalues, tol);
+  if (Math.abs(constant) < tol) return form;
+  if (form === 'zero') return constant > 0 ? 'positive' : 'negative';
+  if (form === 'positive' && constant > 0) return 'positive';
+  if (form === 'negative' && constant < 0) return 'negative';
+  if (form === 'nonnegative' && constant > 0) return 'positive';
+  if (form === 'nonpositive' && constant < 0) return 'negative';
+  return 'indefinite';
+}
+
+function eigenvalueSign(eigenvalues: number[], tol: number): SignClass {
+  if (eigenvalues.length === 0 || eigenvalues.every((value) => Math.abs(value) <= tol)) return 'zero';
+  const positive = eigenvalues.some((value) => value > tol);
+  const negative = eigenvalues.some((value) => value < -tol);
+  const zero = eigenvalues.some((value) => Math.abs(value) <= tol);
+  if (positive && negative) return 'indefinite';
+  if (positive) return zero ? 'nonnegative' : 'positive';
+  if (negative) return zero ? 'nonpositive' : 'negative';
+  return 'zero';
 }
 
 export function isIdenticallyZero(expr: string, vars: string[]): boolean {

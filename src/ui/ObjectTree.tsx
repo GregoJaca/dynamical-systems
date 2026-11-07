@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { lyapunovCurvesAvailable } from '../core/layers';
 import type { EquilibriumAnalysis, LayerVisibility, ManifoldBranch } from '../core/types';
 import { equilibriumColor, PALETTE } from '../core/palette';
 import { useSystemStore } from '../store/useSystemStore';
@@ -194,8 +195,6 @@ export function ObjectTree() {
 
   return (
     <div className="viz-list">
-      <p className="viz-hint">Hover a row to highlight it on the portrait. Click the row to show or hide it.</p>
-
       {analysis.equilibria.length > 0 && (
         <Block>
           <LayerRow title="Equilibria" on={layers.equilibria} dashed={false} color={palette.equilibrium} focus="group:equilibria" onToggle={toggle('equilibria')} />
@@ -390,9 +389,7 @@ export function ObjectTree() {
         </Block>
       )}
 
-      {analysis.global.lyapunov &&
-        analysis.global.lyapunov.classification !== 'indefinite' &&
-        !(analysis.global.isHamiltonian && analysis.global.lyapunov.classification === 'conserved_first_integral') && (
+      {lyapunovCurvesAvailable(analysis) && analysis.global.lyapunov && (
         <Block>
           <LayerRow
             title="Lyapunov levels"

@@ -285,9 +285,6 @@ export const useSystemStore = create<SystemStore>((set, get) => {
     }
     const layers = { ...get().layers };
     if (analysis.global.isHamiltonian && !before.global.isHamiltonian) layers.hamiltonianContours = true;
-    if (analysis.global.lyapunov && !before.global.lyapunov && analysis.global.lyapunov.classification !== 'indefinite') {
-      layers.lyapunov = true;
-    }
     if (analysis.global.linearSystemExact && !before.global.linearSystemExact) layers.linearSubspaces = true;
     set({ analysis, layers, casStatus: 'ready', casWarnings: enrichment.warnings ?? [] });
   };

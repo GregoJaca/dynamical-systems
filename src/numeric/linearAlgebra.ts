@@ -167,19 +167,33 @@ function cartesianFormula(kind: string, coords: number[], vectors: number[][], n
   if (vectors.length === 1 && coords.length >= 2 && (vectors[0]?.length ?? 0) >= 2) {
     const vx = vectors[0]?.[0] ?? 0;
     const vy = vectors[0]?.[1] ?? 0;
-    const x = names[0] ?? 'x';
-    const y = names[1] ?? 'y';
-    return `${label}: ${latexNumber(vy)}(${x} - ${latexNumber(coords[0] ?? 0)}) + ${latexNumber(-vx)}(${y} - ${latexNumber(coords[1] ?? 0)}) = 0`;
+    return `${label}: ${constraintLatex([vy, -vx], coords, names)} = 0`;
   }
   if (vectors.length >= 2 && coords.length >= 3) {
     const normal = cross(vectors[0] ?? [], vectors[1] ?? []);
-    const terms = normal
-      .slice(0, 3)
-      .map((coeff, index) => `${latexNumber(coeff)}(${names[index] ?? `x_${index + 1}`} - ${latexNumber(coords[index] ?? 0)})`);
-    return `${label}: ${terms.join(' + ')} = 0`;
+    return `${label}: ${constraintLatex(normal.slice(0, 3), coords, names)} = 0`;
   }
   if (vectors.length >= coords.length) return `${label}: \\mathbb{R}^{${coords.length}}`;
   return `${label}: \\operatorname{span}\\{${vectors.map((vector) => vectorLatex(vector)).join(', ')}\\}`;
+}
+
+function constraintLatex(coeffs: number[], coords: number[], names: string[]): string {
+  const scale = coeffs.find((value) => Math.abs(value) > 1e-8);
+  const signed = scale !== undefined && scale < 0 ? coeffs.map((value) => -value) : coeffs;
+  const parts: string[] = [];
+  signed.forEach((coeff, index) => {
+    if (Math.abs(coeff) < 1e-8) return;
+    const name = names[index] ?? `x_{${index + 1}}`;
+    const origin = coords[index] ?? 0;
+    const body = Math.abs(origin) < 1e-8 ? name : `\\left(${name} - ${latexNumber(origin)}\\right)`;
+    const factor = latexNumber(coeff);
+    if (factor === '0') return;
+    if (factor === '1') parts.push(body);
+    else if (factor === '-1') parts.push(`-${body}`);
+    else parts.push(`${factor}${body}`);
+  });
+  if (parts.length === 0) return '0';
+  return parts.join(' + ').replaceAll(' + -', ' - ');
 }
 
 function vectorLatex(vector: number[]): string {
@@ -198,11 +212,9 @@ function column(matrix: number[][], index: number): number[] {
   return matrix.map((row) => row[index] ?? 0);
 }
 
+/** Scale so the largest entry is ±1, then snap entries that are simple rationals. */
 export function normalize(vector: number[]): number[] {
-  const flipped = orient(vector);
-  const length = Math.hypot(...flipped);
-  if (length < 1e-14) return flipped.map(() => 0);
-  return flipped.map((value) => value / length);
+  return clarify(orient(vector));
 }
 
 function orient(vector: number[]): number[] {
@@ -222,9 +234,27 @@ function orientComplexPair(realIn: number[], imagIn: number[]): { real: number[]
     real = real.map((value) => -value);
     imag = imag.map((value) => -value);
   }
-  const scale = Math.hypot(Math.hypot(...real), Math.hypot(...imag));
+  const scale = Math.max(...real.map(Math.abs), ...imag.map(Math.abs));
   if (scale < 1e-14) return { real, imag };
-  return { real: real.map((value) => value / scale), imag: imag.map((value) => value / scale) };
+  return {
+    real: real.map((value) => snapRational(value / scale)),
+    imag: imag.map((value) => snapRational(value / scale)),
+  };
+}
+
+function clarify(vector: number[]): number[] {
+  const scale = Math.max(...vector.map(Math.abs));
+  if (scale < 1e-14) return vector.map(() => 0);
+  return vector.map((value) => snapRational(value / scale));
+}
+
+function snapRational(value: number): number {
+  if (Math.abs(value) < 1e-9) return 0;
+  for (let den = 1; den <= 12; den += 1) {
+    const num = Math.round(value * den);
+    if (Math.abs(value - num / den) < 1e-8) return num / den;
+  }
+  return value;
 }
 
 function levenberg(matrix: number[][], rhs: number[], lambda: number): number[] | null {

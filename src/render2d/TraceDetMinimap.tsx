@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EquilibriumAnalysis, TraceDetMinimapProps } from '../core/types';
 import { PALETTE, equilibriumColor } from '../core/palette';
 import { coordList } from '../ui/format';
@@ -23,8 +23,8 @@ const VIEW_H = 340;
 function fitWindow(equilibria: EquilibriumAnalysis[]): PlaneWindow {
   let tMin = -2;
   let tMax = 2;
-  let dMin = -1.5;
-  let dMax = 3;
+  let dMin = -1.6;
+  let dMax = 2.4;
   for (const equilibrium of equilibria) {
     const tau = equilibrium.trace.value;
     const det = equilibrium.determinant.value;
@@ -34,17 +34,18 @@ function fitWindow(equilibria: EquilibriumAnalysis[]): PlaneWindow {
     dMin = Math.min(dMin, det);
     dMax = Math.max(dMax, det);
   }
-  const padT = Math.max(0.55, 0.28 * (tMax - tMin));
-  const padD = Math.max(0.55, 0.28 * (dMax - dMin));
-  tMin -= padT;
-  tMax += padT;
-  dMin -= padD;
-  dMax += padD;
-  if (dMin > -0.4) dMin = -0.8;
-  if (tMin > -0.4) tMin = -1;
-  if (tMax < 0.4) tMax = 1;
-  const edge = Math.max(tMin * tMin, tMax * tMax) / 4;
-  if (dMax < Math.min(edge, 6)) dMax = Math.max(dMax, Math.min(edge, 8));
+  const spanT = Math.max(tMax - tMin, 1);
+  const spanD = Math.max(dMax - dMin, 1);
+  tMin -= spanT * 0.22;
+  tMax += spanT * 0.22;
+  dMin -= spanD * 0.18;
+  dMax += spanD * 0.18;
+  if (tMin > -1.4) tMin = -1.8;
+  if (tMax < 1.4) tMax = 1.8;
+  if (dMin > -1) dMin = -1.4;
+  const half = Math.max(Math.abs(tMin), Math.abs(tMax));
+  const focusRoom = ((half * 0.5) * (half * 0.5)) / 4;
+  if (dMax < focusRoom * 1.45) dMax = Math.max(dMax, focusRoom * 1.45);
   return { tMin, tMax, dMin, dMax };
 }
 
@@ -102,9 +103,7 @@ function inside(win: PlaneWindow, tau: number, delta: number): boolean {
 
 export function TraceDetMinimap(props: TraceDetMinimapProps) {
   const palette = PALETTE[props.theme];
-  const auto = useMemo(() => fitWindow(props.analysis.equilibria), [props.analysis.equilibria]);
-  const [manual, setManual] = useState<PlaneWindow | null>(null);
-  const win = manual ?? auto;
+  const win = useMemo(() => fitWindow(props.analysis.equilibria), [props.analysis.equilibria]);
   const plot: PlotBox = { left: 46, top: 16, width: VIEW_W - 64, height: VIEW_H - 58 };
   const history = useRef(new Map<string, Array<{ tau: number; det: number }>>());
   const [, bump] = useState(0);
@@ -181,35 +180,13 @@ export function TraceDetMinimap(props: TraceDetMinimapProps) {
     },
   ];
 
-  const onWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
-    event.preventDefault();
-    const rect = event.currentTarget?.getBoundingClientRect();
-    if (!rect || rect.width < 1 || rect.height < 1) return;
-    const factor = Math.exp(Math.max(-120, Math.min(120, event.deltaY)) * 0.0015);
-    const px = ((event.clientX - rect.left) / rect.width) * VIEW_W;
-    const py = ((event.clientY - rect.top) / rect.height) * VIEW_H;
-    setManual((current) => {
-      const base = current ?? auto;
-      const tau = base.tMin + ((px - plot.left) / plot.width) * (base.tMax - base.tMin);
-      const delta = base.dMax - ((py - plot.top) / plot.height) * (base.dMax - base.dMin);
-      return {
-        tMin: tau + (base.tMin - tau) * factor,
-        tMax: tau + (base.tMax - tau) * factor,
-        dMin: delta + (base.dMin - delta) * factor,
-        dMax: delta + (base.dMax - delta) * factor,
-      };
-    });
-  };
-
   return (
     <svg
       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
       className="h-full w-full"
       role="img"
       aria-label="Trace determinant minimap"
-      style={{ background: palette.bg, touchAction: 'none' }}
-      onWheel={onWheel}
-      onDoubleClick={() => setManual(null)}
+      style={{ background: palette.bg }}
     >
       <defs>
         <clipPath id="trace-det-plot">
