@@ -139,8 +139,9 @@ function manifoldSeries(
       break;
     }
   }
+  const printedDegree = reducedSeries.reduce((last, value, index) => (Math.abs(value) > 1e-8 ? index : last), 0);
   const reducedLatex = reduced
-    ? `\\dot{u} = ${seriesMonomialLatex(reducedSeries, 'u')}${higherRemainder(reducedSeries, reduced.degree)}`
+    ? `\\dot{u} = ${seriesMonomialLatex(reducedSeries, 'u')}${higherRemainder(reducedSeries, printedDegree)}`
     : undefined;
   return { taylorLatex, reducedLatex, reduced };
 }
@@ -219,16 +220,16 @@ function graphLatex(vars: string[], coords: number[], tangent: number[], transve
   const axis = axisAligned(tangent, transverse);
   const polynomial = seriesMonomialLatex(h, 'u');
   if (axis === 'horizontal') {
-    const along = Math.abs(coords[0] ?? 0) < 1e-8 ? xLatex : `(${xLatex}-${latexNumber(coords[0] ?? 0)})`;
+    const along = Math.abs(coords[0] ?? 0) < 1e-5 ? xLatex : `(${xLatex}-${latexNumber(coords[0] ?? 0)})`;
     const shifted = retargetSeries(polynomial, along);
     const scale = transverse[1] ?? 1;
     const expression = Math.abs(scale - 1) < 1e-8 ? shifted : scaleExpression(shifted, scale);
-    if (Math.abs(coords[1] ?? 0) < 1e-8) return `${yLatex} = ${expression}`;
+    if (Math.abs(coords[1] ?? 0) < 1e-5) return `${yLatex} = ${expression}`;
     return `${yLatex} = ${latexNumber(coords[1] ?? 0)}+${expression}`;
   }
   if (axis === 'vertical') {
     if (polynomial === '0') return `${xLatex} = ${latexNumber(coords[0] ?? 0)}`;
-    const along = Math.abs(coords[1] ?? 0) < 1e-8 ? yLatex : `(${yLatex}-${latexNumber(coords[1] ?? 0)})`;
+    const along = Math.abs(coords[1] ?? 0) < 1e-5 ? yLatex : `(${yLatex}-${latexNumber(coords[1] ?? 0)})`;
     const shifted = retargetSeries(polynomial, along);
     const scale = transverse[0] ?? 1;
     const expression = Math.abs(scale - 1) < 1e-8 ? shifted : scaleExpression(shifted, scale);

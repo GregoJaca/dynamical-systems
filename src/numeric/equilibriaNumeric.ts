@@ -24,7 +24,7 @@ export interface EquilibriumSearch {
   searchRadius: number;
 }
 
-const ROOT_TOL = 1e-9;
+const ROOT_TOL = 1e-12;
 const DEDUP = 1e-5;
 const HYPERBOLIC_TOL = 1e-7;
 
@@ -35,10 +35,10 @@ export function findEquilibriaNumeric(search: EquilibriumSearch): EquilibriumAna
   for (const seed of seeds) {
     const root = newton(compiled, seed, search.searchRadius);
     if (!root) continue;
-    if (search.periodicVars.some(Boolean) && !insidePeriodicWindow(root, search.periodicVars)) continue;
-    if (roots.some((other) => distance(other, root) < DEDUP)) continue;
-    const residual = infNorm(compiled.f(0, root, compiled.parameterValues));
-    if (residual < 1e-8) roots.push(root.map((value) => (Math.abs(value) < 1e-8 ? 0 : value)));
+    const polished = polishRoot(compiled, root);
+    if (search.periodicVars.some(Boolean) && !insidePeriodicWindow(polished, search.periodicVars)) continue;
+    if (roots.some((other) => distance(other, polished) < DEDUP)) continue;
+    if (infNorm(compiled.f(0, polished, compiled.parameterValues)) < 1e-9) roots.push(polished);
   }
   roots.sort((a, b) => {
     for (let i = 0; i < dimension; i += 1) {
@@ -133,6 +133,14 @@ function classify(input: ClassInput): {
   reason: string;
 } {
   const hyperbolic = input.eigenvalues.eigenvalues.every((lambda) => Math.abs(lambda.re) > HYPERBOLIC_TOL);
+  if (input.dimension === 1) {
+    const rate = input.eigenvalues.eigenvalues[0]?.re ?? 0;
+    return {
+      stability: Math.abs(rate) <= HYPERBOLIC_TOL ? 'undetermined' : rate < 0 ? 'asymptotically_stable' : 'unstable',
+      hyperbolic,
+      reason: hyperbolic ? 'The derivative at the rest point is nonzero.' : 'The derivative vanishes, so the rest point is non-hyperbolic.',
+    };
+  }
   if (input.dimension === 2) {
     return { ...classify2D(input), hyperbolic };
   }
@@ -356,18 +364,34 @@ function linearizationFaithful(compiled: CompiledSystem, coords: number[], jacob
   return true;
 }
 
+function polishRoot(compiled: CompiledSystem, x: number[]): number[] {
+  const params = compiled.parameterValues;
+  let current = x.slice();
+  let residual = infNorm(compiled.f(0, current, params));
+  const snapped = current.map((value) => (Math.abs(value) < 1e-4 ? 0 : value));
+  const snappedResidual = infNorm(compiled.f(0, snapped, params));
+  if (snappedResidual <= residual + 1e-15) {
+    current = snapped;
+    residual = snappedResidual;
+  }
+  return current;
+}
+
 function newton(compiled: CompiledSystem, seed: number[], radius: number): number[] | null {
   let x = seed.slice();
   let fx = compiled.f(0, x, compiled.parameterValues);
   let residual = infNorm(fx);
-  if (residual < ROOT_TOL) return x;
+  if (residual < ROOT_TOL) return polishRoot(compiled, x);
   for (let iter = 0; iter < 45; iter += 1) {
     const jacobian = compiled.J(0, x, compiled.parameterValues);
     const step = solveLinear(
       jacobian,
       fx.map((value) => -value),
     );
-    if (!step || step.some((value) => !Number.isFinite(value))) return residual < 1e-8 ? x : null;
+    if (!step || step.some((value) => !Number.isFinite(value))) {
+      const polished = polishRoot(compiled, x);
+      return infNorm(compiled.f(0, polished, compiled.parameterValues)) < 1e-8 ? polished : null;
+    }
     const stepNorm = Math.hypot(...step);
     const cap = Math.max(2, radius);
     const limited = stepNorm > cap ? step.map((value) => (value * cap) / stepNorm) : step;
@@ -394,10 +418,11 @@ function newton(compiled: CompiledSystem, seed: number[], radius: number): numbe
       }
       alpha *= 0.5;
     }
-    if (residual < ROOT_TOL) return x;
+    if (residual < ROOT_TOL) return polishRoot(compiled, x);
     if (!improved) break;
   }
-  return residual < 1e-8 ? x : null;
+  const polished = polishRoot(compiled, x);
+  return infNorm(compiled.f(0, polished, compiled.parameterValues)) < 1e-8 ? polished : null;
 }
 
 function seedPoints(dimension: number, radius: number, periodic: boolean[]): number[][] {
