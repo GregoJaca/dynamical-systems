@@ -311,10 +311,23 @@ body[data-theme='dark'] .stage {
   position: relative;
 }
 
-.portrait-tools details label {
+.examples-page {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.check-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.35rem 1.25rem;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.check-list label {
   display: flex;
-  gap: 0.4rem;
-  padding: 0.15rem 0;
+  gap: 0.45rem;
+  align-items: baseline;
 }
 
 .equilibrium-list {

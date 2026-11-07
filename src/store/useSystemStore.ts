@@ -56,13 +56,13 @@ export interface SystemStore extends SnapshotSource {
   galleryOpen: boolean;
   extendedPhase: boolean;
   draftVars: string[];
-  view: 'system' | 'portrait' | 'notes';
+  view: 'system' | 'portrait' | 'notes' | 'examples';
   boot: () => void;
   loadSnapshot: (snapshot: ShareSnapshot) => void;
   loadExample: (example: PerkoExample) => void;
   setDraftRow: (index: number, value: string) => void;
   setSystem: (vars: string[], rows: string[]) => void;
-  setView: (view: 'system' | 'portrait' | 'notes') => void;
+  setView: (view: 'system' | 'portrait' | 'notes' | 'examples') => void;
   setMode: (mode: SystemMode) => void;
   setDimension: (dimension: number) => void;
   setParameterValue: (name: string, value: number) => void;

@@ -1,14 +1,11 @@
 import { useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
 import { PERKO_EXAMPLES } from '../examples/perkoExamples';
 import { useSystemStore } from '../store/useSystemStore';
 import { rowPreviewLatex } from './asciiLatex';
 import { Katex } from './Katex';
 
 export function ExampleGallery() {
-  const open = useSystemStore((state) => state.galleryOpen);
   const activeId = useSystemStore((state) => state.exampleId);
-  const closeGallery = useSystemStore((state) => state.closeGallery);
   const loadExample = useSystemStore((state) => state.loadExample);
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
@@ -20,33 +17,18 @@ export function ExampleGallery() {
   }, [query]);
   const groups = [...new Set(filtered.map((example) => example.group))];
 
-  if (!open) return null;
-
   return (
-    <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/45 p-4 backdrop-blur-sm" onClick={closeGallery}>
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="sheet scroll-thin max-h-full w-full max-w-5xl overflow-auto rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-5"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="font-display text-2xl">Examples</h2>
-          </div>
-          <div className="flex gap-2">
-            <input
-              className="rounded-full bg-black/10 px-3 py-1.5 text-sm"
-              placeholder="Search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label="Search examples"
-            />
-            <button type="button" className="rounded-full px-3 py-1 text-sm" onClick={closeGallery}>
-              Close
-            </button>
-          </div>
-        </div>
+    <div className="examples-page">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <h1>Examples</h1>
+        <input
+          className="eq-input"
+          placeholder="Search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          aria-label="Search examples"
+        />
+      </div>
         {groups.map((group) => (
           <section key={group} className="mb-4">
             <h3 className="mb-2 text-[11px] uppercase tracking-[0.16em] opacity-60">{group}</h3>
@@ -75,7 +57,6 @@ export function ExampleGallery() {
             </div>
           </section>
         ))}
-      </motion.div>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { EquationPanel } from './EquationPanel';
 import { EquilibriaPanel } from './EquilibriaPanel';
 import { ExampleGallery } from './ExampleGallery';
 import { hideObjects } from './filterAnalysis';
+import { ObjectTree } from './ObjectTree';
 import { prettyLabel } from './format';
 import { Katex } from './Katex';
 import { TheoremsPanel } from './TheoremsPanel';
@@ -40,6 +41,9 @@ function Portrait() {
   const setFlowMap = useSystemStore((state) => state.setFlowMap);
   const toggleLayer = useSystemStore((state) => state.toggleLayer);
   const toggleParticles = useSystemStore((state) => state.toggleParticles);
+  const setParticleMode = useSystemStore((state) => state.setParticleMode);
+  const toggleFlowMap = useSystemStore((state) => state.toggleFlowMap);
+  const setExtendedPhase = useSystemStore((state) => state.setExtendedPhase);
   const analysis = hideObjects(rawAnalysis, hiddenObjectIds);
 
   const showExtended = spec.dimension === 2 && !spec.isAutonomous && extendedPhase;
@@ -96,31 +100,11 @@ function Portrait() {
             {particles.playing ? 'Stop motion' : 'Move along the curves'}
           </button>
         )}
-        <details>
-          <summary>Curves</summary>
-          <label>
-            <input type="checkbox" checked={layers.streamlines} onChange={() => toggleLayer('streamlines')} /> Trajectories
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={layers.manifoldsWuWs || layers.centerManifoldWc}
-              onChange={() => {
-                const next = !(layers.manifoldsWuWs || layers.centerManifoldWc);
-                if (layers.manifoldsWuWs !== next) toggleLayer('manifoldsWuWs');
-                if (layers.centerManifoldWc !== next) toggleLayer('centerManifoldWc');
-                if (layers.separatrices !== next) toggleLayer('separatrices');
-              }}
-            />{' '}
-            Manifolds
-          </label>
-          <label>
-            <input type="checkbox" checked={layers.nullclines} onChange={() => toggleLayer('nullclines')} /> Nullclines
-          </label>
-          <label>
-            <input type="checkbox" checked={layers.linearSubspaces} onChange={() => toggleLayer('linearSubspaces')} /> Eigenspaces
-          </label>
-        </details>
+        {show2d && particles.playing && (
+          <button type="button" onClick={() => setParticleMode(particles.mode === 'trueVelocity' ? 'uniformSpeed' : 'trueVelocity')}>
+            {particles.mode === 'trueVelocity' ? 'Speed follows the vector field' : 'Uniform speed'}
+          </button>
+        )}
       </div>
 
       {analysis.equilibria.length > 0 && (
@@ -142,6 +126,57 @@ function Portrait() {
           </div>
         </section>
       )}
+
+      <section className="below">
+        <h2>What is drawn</h2>
+        <div className="check-list">
+          {(
+            [
+              ['streamlines', 'Trajectories'],
+              ['separatrices', 'Separatrices'],
+              ['manifoldsWuWs', 'Stable and unstable manifolds'],
+              ['centerManifoldWc', 'Center manifold'],
+              ['linearSubspaces', 'Eigenspaces'],
+              ['nullclines', 'Nullclines'],
+              ['limitCycles', 'Limit cycles'],
+              ['vectorField', 'Vector field arrows'],
+              ['basins', 'Basins'],
+              ['lyapunov', 'Lyapunov levels'],
+              ['hamiltonianContours', 'Hamiltonian levels'],
+              ['equilibria', 'Equilibria'],
+              ['timeSeries', 'Time series'],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key}>
+              <input type="checkbox" checked={layers[key]} onChange={() => toggleLayer(key)} /> {label}
+            </label>
+          ))}
+          {show2d && (
+            <label>
+              <input type="checkbox" checked={flowMap.active} onChange={toggleFlowMap} /> Flow of a small disk
+            </label>
+          )}
+          {spec.dimension === 2 && !spec.isAutonomous && (
+            <label>
+              <input type="checkbox" checked={extendedPhase} onChange={() => setExtendedPhase(!extendedPhase)} /> Extended phase space (x, y, t)
+            </label>
+          )}
+        </div>
+        {layers.timeSeries && spec.dimension < 4 && (
+          <div className="stage polar-stage">
+            <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} />
+          </div>
+        )}
+        <ObjectTree />
+        <p className="note-exports">
+          <button type="button" className="text-button" onClick={() => void downloadPortrait('svg', spec, analysis, theme, layers)}>
+            Download SVG
+          </button>
+          <button type="button" className="text-button" onClick={() => void downloadPortrait('png', spec, analysis, theme, layers)}>
+            Download PNG
+          </button>
+        </p>
+      </section>
     </div>
   );
 }
@@ -150,7 +185,6 @@ function Notes() {
   const spec = useSystemStore((state) => state.spec);
   const analysis = useSystemStore((state) => state.analysis);
   const theme = useSystemStore((state) => state.theme);
-  const layers = useSystemStore((state) => state.layers);
   const selectedEquilibriumId = useSystemStore((state) => state.selectedEquilibriumId);
   const selectEquilibrium = useSystemStore((state) => state.selectEquilibrium);
 
@@ -177,14 +211,6 @@ function Notes() {
         <h2>Coordinates and integrals</h2>
         <CoordinatesPanel />
       </section>
-      <p className="note-exports">
-        <button type="button" className="text-button" onClick={() => void downloadPortrait('svg', spec, analysis, theme, layers)}>
-          Download SVG
-        </button>
-        <button type="button" className="text-button" onClick={() => void downloadPortrait('png', spec, analysis, theme, layers)}>
-          Download PNG
-        </button>
-      </p>
     </div>
   );
 }
@@ -230,6 +256,9 @@ export function AppShell() {
           <button type="button" className={view === 'notes' ? 'current' : ''} onClick={() => setView('notes')}>
             Notes
           </button>
+          <button type="button" className={view === 'examples' ? 'current' : ''} onClick={() => setView('examples')}>
+            Examples
+          </button>
         </nav>
         <strong className="current-title">{title}</strong>
         <div className="top-actions">
@@ -252,8 +281,8 @@ export function AppShell() {
         )}
         {view === 'portrait' && <Portrait />}
         {view === 'notes' && <Notes />}
+        {view === 'examples' && <ExampleGallery />}
       </main>
-      <ExampleGallery />
     </div>
   );
 }

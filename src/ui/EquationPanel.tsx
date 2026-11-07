@@ -66,7 +66,6 @@ export function EquationPanel() {
   const numericStatus = useSystemStore((state) => state.numericStatus);
   const setSystem = useSystemStore((state) => state.setSystem);
   const setUserLyapunov = useSystemStore((state) => state.setUserLyapunov);
-  const openGallery = useSystemStore((state) => state.openGallery);
   const setView = useSystemStore((state) => state.setView);
   const [pending, setPending] = useState('');
   const [lyapunov, setLyapunov] = useState(spec.userLyapunovExpr ?? '');
@@ -215,8 +214,8 @@ export function EquationPanel() {
         <button type="submit" disabled={Boolean(parseError)}>
           Study this system
         </button>
-        <button type="button" className="text-button" onClick={openGallery}>
-          Choose an example
+        <button type="button" className="text-button" onClick={() => setView('examples')}>
+          Examples
         </button>
       </div>
     </form>
