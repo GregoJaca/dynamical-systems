@@ -236,6 +236,13 @@ def lx(expr: sp.Expr) -> str:
     return rendered.replace(" ", "")
 
 
+def _coord_shift(name: str, origin: sp.Expr) -> str:
+    """Latex for a coordinate measured from an equilibrium, parenthesized when shifted."""
+    if is_zero(origin):
+        return name
+    return rf"\left({lx(sp.Symbol(name) - origin)}\right)"
+
+
 def _exact_number(expr: sp.Expr) -> dict[str, Any]:
     simplified = sp.simplify(expr)
     return {"value": _to_float(simplified), "exactLatex": lx(simplified)}
@@ -424,7 +431,8 @@ def _realize_solution(
     if any(not _is_real_expr(base) for base, is_free in zip(bases, free) if base is not None and not is_free):
         return []
     family = _family_latex(variables, bases, periodic, free)
-    isolated = not any(free) and not any(periodic)
+    # A periodic coordinate still has isolated zeros; only a free parameter is a continuum.
+    isolated = not any(free)
     offsets = [0]
     if any(periodic):
         offsets = [-2, -1, 0, 1, 2]
@@ -455,7 +463,7 @@ def _realize_solution(
                 coords.append(base)
         if not keep:
             continue
-        points.append({"coords": coords, "family": family, "isolated": isolated and not any(periodic)})
+        points.append({"coords": coords, "family": family, "isolated": isolated})
     if not points and not any(periodic):
         points.append({"coords": [base if base is not None else sp.Integer(0) for base in bases], "family": family, "isolated": isolated})
     return points
@@ -923,7 +931,7 @@ def _cartesian_formula(prefix: str, vectors: list[sp.Matrix], origin: sp.Matrix,
         if is_zero(direction[1]):
             return rf"{prefix}: {names[1]}={lx(origin[1])}"
         slope = sp.simplify(direction[1] / direction[0])
-        return rf"{prefix}: {names[1]}-{lx(origin[1])}={lx(slope)}\left({names[0]}-{lx(origin[0])}\right)"
+        return rf"{prefix}: {_coord_shift(names[1], origin[1])}={lx(slope)}{_coord_shift(names[0], origin[0])}"
     if dimension == 3 and len(vectors) == 2:
         normal = vectors[0].cross(vectors[1])
         terms = []
@@ -1337,7 +1345,7 @@ def _format_curve(
     reverted = _revert(deviations[independent], u, xi, degree)
     if reverted is None:
         return None
-    atom = names[independent] if is_zero(origin[independent]) else rf"\left({names[independent]}-{lx(origin[independent])}\right)"
+    atom = _coord_shift(names[independent], origin[independent])
     relations: list[str] = []
     for index, deviation in enumerate(deviations):
         if index == independent:
@@ -1351,7 +1359,7 @@ def _format_curve(
             relation = f"{target}={lx(star)}" if exact else f"{target}={lx(star)}+O({atom}^{{{degree + 1}}})"
         else:
             body = _poly_latex(truncated, xi, atom)
-            relation = f"{target}={body}" if is_zero(star) else f"{target}-{lx(star)}={body}"
+            relation = f"{target}={body}" if is_zero(star) else f"{_coord_shift(target, star)}={body}"
             if not exact:
                 relation += f"+O({atom}^{{{degree + 1}}})"
         relations.append(relation)
@@ -1414,6 +1422,14 @@ def _reduced_dynamics(
     return formula, "unstable", None, rf"On the center manifold $\dot{{u}}={body}{remainder}$, the first nonzero coefficient is positive."
 
 
+def _state_is_angular(f: sp.Matrix, variables: list[sp.Symbol]) -> bool:
+    return any(
+        expr.has(sp.sin(var)) or expr.has(sp.cos(var)) or expr.has(sp.tan(var))
+        for expr in f
+        for var in variables
+    )
+
+
 def _coordinate_transforms(
     f: sp.Matrix,
     variables: list[sp.Symbol],
@@ -1431,7 +1447,7 @@ def _coordinate_transforms(
         for item in near_origin
     )
     result: dict[str, Any] = {}
-    if len(variables) == 2:
+    if len(variables) == 2 and not _state_is_angular(f, variables):
         polar = _polar(f, variables, origin_is_rotation)
         if polar:
             result["polar2D"] = polar
