@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
 import type { CompiledSystem, PolarCanvasProps } from '../core/types';
-import { PALETTE } from '../core/palette';
-import { finitePair, makeView, niceTicks, screenToWorld, worldToScreen, type ViewRect } from './geometry';
-import { rk4Step, type Rhs } from './integrate';
+import { PALETTE, equilibriumColor } from '../core/palette';
+import { matchesFocus } from '../core/focus';
+import { screenToWorld, worldToScreen, type ViewRect } from './geometry';
+import { type Rhs } from './integrate';
 import { spawnParticles, stepParticles, type SimParticle } from './particles';
+import { cartesianToPolar, seedPolarOrbits } from './polarFlow';
 import { compilePolarField } from './scalars';
-import { drawBackground, drawGrid, drawParticles, drawVectorArrows, strokeArrow, strokeWorldPath, type ArrowSample } from './paint';
+import { curveAlpha, curveWidth, drawBackground, drawGrid, drawParticles, drawVectorArrows, strokeArrow, strokeWorldPath, type ArrowSample } from './paint';
 
 interface PolarBounds {
   rMin: number;
@@ -17,14 +17,14 @@ interface PolarBounds {
 }
 
 function suggestedRadius(props: PolarCanvasProps): number {
-  const radial = props.analysis.coordinateTransforms.polar2D?.radialEquilibriaR ?? [];
+  const radial = (props.analysis.coordinateTransforms.polar2D?.radialEquilibriaR ?? []).filter((value) => value > 1e-3);
   const viewport = props.analysis.viewport;
   const corner = Math.hypot(
     Math.max(Math.abs(viewport.xMin), Math.abs(viewport.xMax)),
     Math.max(Math.abs(viewport.yMin), Math.abs(viewport.yMax)),
   );
-  const fromCycles = radial.length > 0 ? Math.max(...radial.map((value) => Math.abs(value))) * 1.45 : 0;
-  return Math.max(2, Math.min(14, fromCycles || 0, corner || 4), fromCycles || 2);
+  if (radial.length > 0) return Math.max(...radial) * 1.35;
+  return Math.max(1.25, Math.min(corner || 3, 6));
 }
 
 function polarField(compiled: CompiledSystem | null, symbolic: ((r: number, theta: number) => [number, number]) | null): Rhs {
@@ -49,71 +49,32 @@ function polarField(compiled: CompiledSystem | null, symbolic: ((r: number, thet
   };
 }
 
-function integratePolar(field: Rhs, r0: number, theta0: number, direction: 1 | -1, rMax: number, params: Record<string, number>): number[][] {
-  let r = r0;
-  let theta = theta0;
-  const path: number[][] = [[r, theta]];
-  const h = 0.045 * direction;
-  for (let step = 0; step < 180; step += 1) {
-    let next: number[];
-    try {
-      next = rk4Step(field, 0, [r, theta], h, params);
-    } catch {
-      break;
-    }
-    r = next[0] ?? r;
-    theta = next[1] ?? theta;
-    if (r < 0) {
-      r = -r;
-      theta += Math.PI;
-    }
-    if (!Number.isFinite(r) || !Number.isFinite(theta) || r > rMax * 1.25 || r < 1e-4) break;
-    path.push([r, theta]);
+function lineSamples(origin: number[], basis: number[], reach: number): number[][] {
+  const norm = Math.hypot(basis[0] ?? 0, basis[1] ?? 0) || 1;
+  const ux = (basis[0] ?? 0) / norm;
+  const uy = (basis[1] ?? 0) / norm;
+  const points: number[][] = [];
+  for (let index = -28; index <= 28; index += 1) {
+    const s = (index / 28) * reach;
+    points.push([(origin[0] ?? 0) + s * ux, (origin[1] ?? 0) + s * uy]);
   }
-  return path;
+  return points;
 }
 
-function foldPolar(path: number[][]): number[][][] {
-  const parts: number[][][] = [];
-  let current: number[][] = [];
-  let previous: number | null = null;
-  for (const point of path) {
-    const r = point[0] ?? 0;
-    const theta = point[1] ?? 0;
-    const folded = Math.atan2(Math.sin(theta), Math.cos(theta));
-    if (previous != null && Math.abs(folded - previous) > 2.4) {
-      if (current.length > 1) parts.push(current);
-      current = [];
-    }
-    current.push([r, folded]);
-    previous = folded;
+function strokePolarPieces(
+  ctx: CanvasRenderingContext2D,
+  view: ViewRect,
+  points: number[][],
+  color: string,
+  width: number,
+  alpha: number,
+  dashed = false,
+  arrow = false,
+): void {
+  for (const piece of cartesianToPolar(points)) {
+    strokeWorldPath(ctx, view, piece, color, width, alpha, dashed);
+    if (arrow) strokeArrow(ctx, view, piece, color, alpha);
   }
-  if (current.length > 1) parts.push(current);
-  return parts;
-}
-
-function cartesianToPolar(points: number[][]): number[][][] {
-  const unwrapped: number[][] = [];
-  let previous = 0;
-  let accumulated = 0;
-  let started = false;
-  for (const point of points) {
-    if (!finitePair(point)) continue;
-    const r = Math.hypot(point[0], point[1]);
-    const theta = Math.atan2(point[1], point[0]);
-    if (!started) {
-      accumulated = theta;
-      started = true;
-    } else {
-      let delta = theta - previous;
-      if (delta > Math.PI) delta -= Math.PI * 2;
-      if (delta < -Math.PI) delta += Math.PI * 2;
-      accumulated += delta;
-    }
-    previous = theta;
-    unwrapped.push([r, accumulated]);
-  }
-  return foldPolar(unwrapped);
 }
 
 export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
@@ -141,31 +102,27 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     );
     const field = polarField(props.compiled, symbolic);
     const params = props.compiled?.parameterValues ?? {};
-    const rMax = Math.max(radius, 1);
-    const seeds: Array<[number, number]> = [];
-    for (const r of [0.2, 0.55, 0.95, 1.45, 2.1, rMax * 0.72]) {
-      if (r <= 0 || r >= rMax) continue;
-      for (const theta of [-2.2, -0.7, 0.4, 1.7]) seeds.push([r, theta]);
-    }
-    for (const r of props.analysis.coordinateTransforms.polar2D?.radialEquilibriaR ?? []) {
-      if (r > 0.05) seeds.push([r * 0.85, 0.2], [r * 1.12, -1]);
-    }
-    const pieces: number[][][] = [];
-    for (const [r, theta] of seeds) {
-      pieces.push(...foldPolar(integratePolar(field, r, theta, 1, rMax, params)));
-      pieces.push(...foldPolar(integratePolar(field, r, theta, -1, rMax, params)));
-    }
-    const arrows: ArrowSample[] = [];
-    for (let row = 0; row < 9; row += 1) {
-      for (let column = 0; column < 10; column += 1) {
-        const r = ((column + 0.5) * rMax) / 10;
-        const theta = -Math.PI + ((row + 0.5) * Math.PI * 2) / 9;
-        const value = field(0, [r, theta], params);
-        if (Number.isFinite(value[0]) && Number.isFinite(value[1])) arrows.push({ x: r, y: theta, fx: value[0] ?? 0, fy: value[1] ?? 0 });
+    const polarInfo = props.analysis.coordinateTransforms.polar2D;
+    const thetaDepends = (polarInfo?.rDotExpr ?? '').includes('theta') || (polarInfo?.thetaDotExpr ?? '').includes('theta');
+    const rMax = Math.max(radius, 0.8);
+    const pieces = seedPolarOrbits(field, rMax, thetaDepends, polarInfo?.radialEquilibriaR ?? [], params);
+    return { pieces, field };
+  }, [props.compiled, props.analysis.coordinateTransforms.polar2D, props.analysis.revision, paramKey, radius]);
+  const arrows = useMemo(() => {
+    const samples: ArrowSample[] = [];
+    const rSpan = Math.max(bounds.rMax - bounds.rMin, 0.2);
+    const thSpan = Math.max(bounds.thMax - bounds.thMin, 0.2);
+    const params = props.compiled?.parameterValues ?? {};
+    for (let row = 0; row < 8; row += 1) {
+      for (let column = 0; column < 11; column += 1) {
+        const r = bounds.rMin + ((column + 0.5) * rSpan) / 11;
+        const theta = bounds.thMin + ((row + 0.5) * thSpan) / 8;
+        const value = curves.field(0, [r, theta], params);
+        if (Number.isFinite(value[0]) && Number.isFinite(value[1])) samples.push({ x: r, y: theta, fx: value[0] ?? 0, fy: value[1] ?? 0 });
       }
     }
-    return { pieces, arrows, field };
-  }, [props.compiled, props.analysis.coordinateTransforms.polar2D, props.analysis.revision, paramKey, radius]);
+    return samples;
+  }, [curves.field, props.compiled, bounds]);
 
   const particleKey = `${props.analysis.revision}:${props.particles.count}:${curves.pieces.length}`;
   const particleKeyRef = useRef('');
@@ -177,13 +134,16 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     );
   }
 
-  const view = makeView(
-    { xMin: bounds.rMin, xMax: bounds.rMax, yMin: bounds.thMin, yMax: bounds.thMax },
-    8,
-    8,
-    Math.max(1, size.w - 16),
-    Math.max(1, size.h - 16),
-  );
+  const view = {
+    left: 58,
+    top: 28,
+    width: Math.max(1, size.w - 78),
+    height: Math.max(1, size.h - 58),
+    xMin: bounds.rMin,
+    xMax: bounds.rMax,
+    yMin: bounds.thMin,
+    yMax: bounds.thMax,
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -225,40 +185,158 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
         const palette = PALETTE[current.theme];
         drawBackground(ctx, current.theme, w, h);
         drawGrid(ctx, liveView, current.theme, false, true);
-        drawVectorArrows(ctx, liveView, arrowRef.current, palette.muted);
-        curvesRef.current.forEach((points, index) => {
-          strokeWorldPath(ctx, liveView, points, palette.streamline, 1.25, 0.9);
-          if (index % 3 === 0) strokeArrow(ctx, liveView, points, palette.streamline, 0.9);
-        });
+        const focusId = current.hoverObjectId;
+        const selectedId = current.selectedObjectId;
+        if (current.layers.vectorField) drawVectorArrows(ctx, liveView, arrowRef.current, palette.muted);
+        if (current.layers.streamlines) {
+          curvesRef.current.forEach((points, index) => {
+            const id = `stream-polar-${index}`;
+            strokeWorldPath(ctx, liveView, points, palette.streamline, curveWidth(id, focusId, selectedId, 1.35), curveAlpha(id, focusId, 0.92));
+            strokeArrow(ctx, liveView, points, palette.streamline, curveAlpha(id, focusId, 0.9));
+          });
+        }
+        if (current.layers.nullclines) {
+          for (const nullcline of current.analysis.nullclines) {
+            const color = nullcline.component === 0 ? palette.nullclineX : palette.nullclineY;
+            for (const branch of nullcline.points) {
+              strokePolarPieces(
+                ctx,
+                liveView,
+                branch,
+                color,
+                curveWidth(nullcline.id, focusId, selectedId, 1.4),
+                curveAlpha(nullcline.id, focusId, 0.9),
+                true,
+              );
+            }
+          }
+        }
+        if (current.layers.separatrices) {
+          for (const segment of current.analysis.streamlines) {
+            if (segment.category !== 'separatrix') continue;
+            strokePolarPieces(
+              ctx,
+              liveView,
+              segment.points,
+              palette.separatrix,
+              curveWidth(segment.id, focusId, selectedId, 2.1),
+              curveAlpha(segment.id, focusId, 0.95),
+              false,
+              true,
+            );
+          }
+        }
+        if (current.layers.manifoldsWuWs || current.layers.centerManifoldWc) {
+          for (const manifold of current.analysis.manifolds) {
+            const visible = manifold.kind === 'Wc' ? current.layers.centerManifoldWc : current.layers.manifoldsWuWs;
+            if (!visible) continue;
+            const color = manifold.kind === 'Ws' ? palette.ws : manifold.kind === 'Wu' ? palette.wu : palette.wc;
+            strokePolarPieces(
+              ctx,
+              liveView,
+              manifold.points,
+              color,
+              curveWidth(manifold.id, focusId, selectedId, 2.15),
+              curveAlpha(manifold.id, focusId, 0.95),
+            );
+          }
+        }
+        if (current.layers.linearSubspaces) {
+          const reach = Math.hypot(liveView.xMax, Math.PI);
+          for (const equilibrium of current.analysis.equilibria) {
+            for (const subspace of equilibrium.subspaces) {
+              const basis = subspace.basisVectors[0];
+              if (!basis) continue;
+              const samples = lineSamples(equilibrium.coords, basis, reach);
+              const id = `${equilibrium.id}:${subspace.kind}`;
+              const color = subspace.kind === 'Es' ? palette.es : subspace.kind === 'Eu' ? palette.eu : palette.ec;
+              strokePolarPieces(ctx, liveView, samples, color, curveWidth(id, focusId, selectedId, 1.3), curveAlpha(id, focusId, 0.85), true);
+            }
+          }
+        }
         const polar = current.analysis.coordinateTransforms.polar2D;
-        for (const [index, rEq] of (polar?.radialEquilibriaR ?? []).entries()) {
-          const stability = polar?.radialStability[index];
-          strokeWorldPath(
-            ctx,
-            liveView,
-            [
-              [rEq, liveView.yMin],
-              [rEq, liveView.yMax],
-            ],
-            palette.cycle,
-            2,
-            0.95,
-            stability === 'repelling' || stability === 'semi_stable',
-          );
+        if (current.layers.limitCycles) {
+          for (const [index, rEq] of (polar?.radialEquilibriaR ?? []).entries()) {
+            const stability = polar?.radialStability[index];
+            strokeWorldPath(
+              ctx,
+              liveView,
+              [
+                [rEq, liveView.yMin],
+                [rEq, liveView.yMax],
+              ],
+              palette.cycle,
+              2,
+              0.95,
+              stability === 'repelling' || stability === 'semi_stable',
+            );
+          }
+          for (const cycle of current.analysis.limitCycles) {
+            strokePolarPieces(
+              ctx,
+              liveView,
+              cycle.points,
+              palette.cycle,
+              curveWidth(cycle.id, focusId, selectedId, 2.2),
+              curveAlpha(cycle.id, focusId, 1),
+              cycle.stability === 'unstable',
+            );
+          }
         }
         for (const orbit of current.userOrbits) {
-          for (const piece of cartesianToPolar(orbit.points)) {
-            strokeWorldPath(ctx, liveView, piece, palette.droplet, 2, 0.95);
+          strokePolarPieces(ctx, liveView, orbit.points, palette.droplet, curveWidth(orbit.id, focusId, selectedId, 2), curveAlpha(orbit.id, focusId, 0.95), false, true);
+        }
+        if (current.layers.equilibria) {
+          for (const equilibrium of current.analysis.equilibria) {
+            const x = equilibrium.coords[0] ?? 0;
+            const y = equilibrium.coords[1] ?? 0;
+            const r = Math.hypot(x, y);
+            const theta = r < 1e-4 ? 0 : Math.atan2(y, x);
+            const [sx, sy] = worldToScreen(liveView, r, theta);
+            if (sx < liveView.left - 8 || sx > liveView.left + liveView.width + 8) continue;
+            if (sy < liveView.top - 8 || sy > liveView.top + liveView.height + 8) continue;
+            const color = equilibriumColor(equilibrium.stability, equilibrium.classification2D ?? equilibrium.classification3D, current.theme);
+            const dim = focusId != null && !matchesFocus(equilibrium.id, focusId);
+            ctx.save();
+            ctx.globalAlpha = dim ? 0.25 : 1;
+            ctx.beginPath();
+            ctx.fillStyle = color;
+            ctx.strokeStyle = palette.bg;
+            ctx.lineWidth = 2;
+            if (equilibrium.stability === 'unstable') {
+              ctx.arc(sx, sy, 5.5, 0, Math.PI * 2);
+              ctx.stroke();
+            } else {
+              ctx.arc(sx, sy, 5.5, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.restore();
           }
         }
         if (current.particles.playing || particlesRef.current.some((particle) => particle.trail.length > 0)) {
-          drawParticles(ctx, liveView, particlesRef.current, null);
+          drawParticles(ctx, liveView, particlesRef.current, focusId);
         }
         ctx.save();
-        ctx.fillStyle = palette.text;
         ctx.font = '12px "Source Sans 3", Segoe UI, sans-serif';
-        ctx.fillText('r', liveView.left + liveView.width - 12, liveView.top + liveView.height - 6);
-        ctx.fillText('θ', liveView.left + 8, liveView.top + 14);
+        ctx.fillStyle = palette.muted;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('θ', 8, liveView.top - 8);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('r', liveView.left + liveView.width + 6, liveView.top + liveView.height - 4);
+        ctx.fillStyle = palette.cycle;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        let lastLabelX = Number.NEGATIVE_INFINITY;
+        const cycleRadii = current.layers.limitCycles ? (polar?.radialEquilibriaR ?? []) : [];
+        for (const rEq of cycleRadii.filter((value) => value > 1e-4).slice(0, 4)) {
+          const [sx] = worldToScreen(liveView, rEq, liveView.yMax);
+          if (sx < liveView.left || sx > liveView.left + liveView.width) continue;
+          if (sx - lastLabelX < 48) continue;
+          lastLabelX = sx;
+          ctx.fillText(`r = ${rEq.toFixed(2)}`, sx, liveView.top - 6);
+        }
         ctx.restore();
       }
       if (propsRef.current.particles.playing) requestFrame();
@@ -286,16 +364,12 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
 
   const viewRef = useRef<ViewRect>(view);
   const curvesRef = useRef(curves.pieces);
-  const arrowRef = useRef(curves.arrows);
+  const arrowRef = useRef(arrows);
   viewRef.current = view;
   curvesRef.current = curves.pieces;
-  arrowRef.current = curves.arrows;
+  arrowRef.current = arrows;
 
   const palette = PALETTE[props.theme];
-  const polar = props.analysis.coordinateTransforms.polar2D;
-  const formula = polar
-    ? katex.renderToString(`${polar.rDotLatex}\\quad ${polar.thetaDotLatex}`, { throwOnError: false })
-    : '';
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const wrap = wrapRef.current;
@@ -331,36 +405,6 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
       }}
     >
       <canvas ref={canvasRef} data-phase-canvas="polar" className="absolute inset-0 h-full w-full" />
-      <svg className="pointer-events-none absolute inset-0 h-full w-full">
-        {niceTicks(bounds.thMin, bounds.thMax, true).map((tick) => {
-          const [, sy] = worldToScreen(view, bounds.rMin, tick.value);
-          return (
-            <text key={tick.label + tick.value} x={view.left + 4} y={sy} fill={palette.muted} fontSize="11">
-              {tick.label}
-            </text>
-          );
-        })}
-        {(polar?.radialEquilibriaR ?? []).map((rEq) => {
-          const [sx] = worldToScreen(view, rEq, bounds.thMax);
-          return (
-            <text key={rEq} x={sx + 4} y={view.top + 16} fill={palette.cycle} fontSize="11">
-              r = {rEq.toFixed(2)}
-            </text>
-          );
-        })}
-      </svg>
-      {formula && (
-        <div
-          className="pointer-events-none absolute left-3 top-2 max-w-[70%] rounded px-2 py-1 text-xs"
-          style={{ background: palette.bg, color: palette.text }}
-          dangerouslySetInnerHTML={{ __html: formula }}
-        />
-      )}
-      {polar?.isRecommended && (
-        <div className="pointer-events-none absolute right-3 top-2 rounded-full px-2 py-0.5 text-[11px]" style={{ color: palette.cycle, border: `1px solid ${palette.cycle}` }}>
-          recommended
-        </div>
-      )}
     </div>
   );
 }

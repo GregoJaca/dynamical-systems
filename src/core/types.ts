@@ -502,6 +502,9 @@ export interface PolarCanvasProps {
   analysis: NumericAnalysis;
   theme: ThemeMode;
   compiled: CompiledSystem | null;
+  layers: LayerVisibility;
+  hoverObjectId: string | null;
+  selectedObjectId: string | null;
   userOrbits: StreamlineSegment[];
   particles: ParticleSettings;
   onTracePolar: (r: number, theta: number) => void;
@@ -541,4 +544,5 @@ export interface HigherDimViewProps {
   theme: ThemeMode;
   compiled: CompiledSystem | null;
   onTracePoint: (point: number[]) => void;
+  role?: 'stacked' | 'portrait' | 'series';
 }

@@ -45,6 +45,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     groundTruth: {
       equilibria: [[0, 0]],
       originClassification2D: 'saddle',
+      polarRecommended: false,
       manifoldCheck: {
         kind: 'Wu',
         residualExpr: 'y - (x^2)/3',
@@ -64,9 +65,11 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['-x + y', '-y'],
     parameters: {},
+    userLyapunovExpr: '(x^2 + y^2) / 2',
     groundTruth: {
       equilibria: [[0, 0]],
       originClassification2D: 'stable_degenerate_node',
+      polarRecommended: false,
     },
   },
   {
@@ -84,6 +87,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
       equilibria: [[0, 0]],
       originClassification2D: 'linear_center',
       hamiltonian: true,
+      polarRecommended: true,
     },
   },
   {
@@ -97,6 +101,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['-y - x * (x^2 + y^2)', 'x - y * (x^2 + y^2)'],
     parameters: {},
+    userLyapunovExpr: '(x^2 + y^2) / 2',
     groundTruth: {
       equilibria: [[0, 0]],
       originClassification2D: 'weak_stable_focus',
@@ -121,6 +126,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
       ],
       originClassification2D: 'nonlinear_center',
       hamiltonian: true,
+      polarRecommended: false,
     },
   },
   {
@@ -134,7 +140,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['x * y', '-y - x^2'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0]] },
+    groundTruth: { equilibria: [[0, 0]], polarRecommended: false },
   },
   {
     id: 'center-manifold-saddle-node',
@@ -147,7 +153,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['x^2', '-y'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0]] },
+    groundTruth: { equilibria: [[0, 0]], polarRecommended: false },
   },
   {
     id: 'nilpotent-cusp',
@@ -163,6 +169,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     groundTruth: {
       equilibria: [[0, 0]],
       originClassification2D: 'cusp',
+      polarRecommended: false,
     },
   },
   {
@@ -176,7 +183,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['x^2 - y', 'y'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0]] },
+    groundTruth: { equilibria: [[0, 0]], polarRecommended: false },
   },
   {
     id: 'hopf',
@@ -225,7 +232,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     parameters: {
       mu: parameter('mu', '\\mu', 1.5, 0, 4, 0.01),
     },
-    groundTruth: { equilibria: [[0, 0]] },
+    groundTruth: { equilibria: [[0, 0]], polarRecommended: true },
   },
   {
     id: 'damped-pendulum',
@@ -240,6 +247,8 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     parameters: {
       gamma: parameter('gamma', '\\gamma', 0.25, 0, 2, 0.01),
     },
+    userLyapunovExpr: 'omega^2 / 2 + 1 - cos(theta)',
+    groundTruth: { polarRecommended: false },
   },
   {
     id: 'undamped-pendulum',
@@ -259,6 +268,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
         [Math.PI, 0],
       ],
       hamiltonian: true,
+      polarRecommended: false,
     },
   },
   {
@@ -281,6 +291,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
         [1, 0],
       ],
       hamiltonian: true,
+      polarRecommended: false,
     },
   },
   {
@@ -304,6 +315,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
         [0, 0],
         [1, 1],
       ],
+      polarRecommended: false,
     },
   },
   {
@@ -324,6 +336,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
         [0, 2],
         [1, 1],
       ],
+      polarRecommended: false,
     },
   },
   {
@@ -337,7 +350,8 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['y', '-x - (1 + x^2 + x^4) * y'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0]] },
+    userLyapunovExpr: '(x^2 + y^2) / 2',
+    groundTruth: { equilibria: [[0, 0]], polarRecommended: true },
   },
   {
     id: 'lyapunov-strict',
@@ -351,7 +365,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     rows: ['-y - x^3', 'x - y^3'],
     parameters: {},
     userLyapunovExpr: '(x^2 + y^2) / 2',
-    groundTruth: { equilibria: [[0, 0]] },
+    groundTruth: { equilibria: [[0, 0]], polarRecommended: true },
   },
   {
     id: 'gradient-wells',
@@ -364,7 +378,8 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['x * (1 - x^2)', 'y * (1 - y^2)'],
     parameters: {},
-    groundTruth: { equilibria: gridEquilibria() },
+    userLyapunovExpr: '-x^2 / 2 + x^4 / 4 - y^2 / 2 + y^4 / 4',
+    groundTruth: { equilibria: gridEquilibria(), polarRecommended: false },
   },
   {
     id: 'saddle-focus-3d',
@@ -377,7 +392,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y', 'z'],
     rows: ['-0.5 * x - 2 * y', '2 * x - 0.5 * y', 'z'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0, 0]] },
+    groundTruth: { equilibria: [[0, 0, 0]], polarRecommended: false },
   },
   {
     id: 'cylindrical-3d',
@@ -390,7 +405,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y', 'z'],
     rows: ['x * (1 - x^2 - y^2) - y', 'y * (1 - x^2 - y^2) + x', '-z'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0, 0]] },
+    groundTruth: { equilibria: [[0, 0, 0]], polarRecommended: false },
   },
   {
     id: 'lorenz',
@@ -413,6 +428,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
         [lorenzWing, lorenzWing, 27],
         [-lorenzWing, -lorenzWing, 27],
       ],
+      polarRecommended: false,
     },
   },
   {
@@ -426,7 +442,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x1', 'x2', 'x3', 'x4'],
     rows: ['x2', '-x1 - 0.2 * x2 + 0.1 * x3', 'x4', '-2 * x3 + 0.1 * x1'],
     parameters: {},
-    groundTruth: { equilibria: [[0, 0, 0, 0]] },
+    groundTruth: { equilibria: [[0, 0, 0, 0]], polarRecommended: false },
   },
 ];
 

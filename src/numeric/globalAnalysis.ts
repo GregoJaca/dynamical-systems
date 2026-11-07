@@ -11,7 +11,7 @@ import type {
   SymmetryInfo,
   SystemSpec,
 } from '../core/types';
-import { symbolToLatex } from '../input/parser';
+import { paintSymbolLatex, symbolToLatex } from '../input/parser';
 import {
   differentiate,
   expressionSign,
@@ -398,24 +398,46 @@ export function radialEquilibria(polar: PolarAnalysis, parameters: Record<string
       return Number.NaN;
     }
   };
-  const samples = 480;
+  const probes: number[] = [];
+  const samples = 240;
   const rMax = 6;
-  let previousR = 1e-3;
-  let previous = probe(previousR);
-  for (let i = 1; i <= samples; i += 1) {
+  let olderR = 1e-3;
+  let older = probe(olderR);
+  let middleR = rMax / samples;
+  let middle = probe(middleR);
+  if (Number.isFinite(older)) probes.push(older);
+  if (Number.isFinite(middle)) probes.push(middle);
+  for (let i = 2; i <= samples; i += 1) {
     const radius = (rMax * i) / samples;
     const value = probe(radius);
-    if (Number.isFinite(previous) && Number.isFinite(value) && previous * value < 0) {
-      radii.push(bisect(probe, previousR, radius));
+    if (Number.isFinite(value)) probes.push(value);
+    if (Number.isFinite(older) && Number.isFinite(middle) && older * middle < 0) radii.push(bisect(probe, olderR, middleR));
+    if (Number.isFinite(middle) && Number.isFinite(value) && middle * value < 0) radii.push(bisect(probe, middleR, radius));
+    const absMiddle = Math.abs(middle);
+    const shoulders = Math.max(Math.abs(older), Math.abs(value));
+    if (
+      Number.isFinite(middle) &&
+      absMiddle <= Math.abs(older) &&
+      absMiddle <= Math.abs(value) &&
+      absMiddle < 1e-4 &&
+      shoulders > 1e-3 &&
+      absMiddle < 0.2 * shoulders
+    ) {
+      radii.push(middleR);
     }
-    if (Number.isFinite(value) && Math.abs(value) < 1e-6) radii.push(radius);
-    previousR = radius;
-    previous = value;
+    olderR = middleR;
+    older = middle;
+    middleR = radius;
+    middle = value;
   }
+  const finite = probes.filter((value) => Number.isFinite(value));
+  const flat = finite.length > 8 && finite.every((value) => Math.abs(value) < 1e-4);
+  if (flat) return { radii: [], stability: [] };
   const unique = radii
     .filter((radius) => radius > 0.05 && Number.isFinite(radius))
     .sort((a, b) => a - b)
     .filter((radius, index, all) => index === 0 || radius - (all[index - 1] ?? 0) > 1e-2);
+  if (unique.length > 6) return { radii: [], stability: [] };
   const stability = unique.map((radius) => {
     if (Math.abs(thetaProbe(radius)) < 1e-6) return 'unknown' as const;
     const inside = probe(radius * 0.9);
@@ -594,18 +616,12 @@ function jacobianMatrixLatex(rhs: string[], vars: string[]): string {
 }
 
 function expressionToDisplay(expr: string, symbols: string[]): string {
-  if (expr.length > 280) {
-    return expr.replace(/\*/g, ' ').replace(/\^(\d+)/g, '^{$1}').replace(/theta/g, '\\theta');
-  }
+  const rough = (value: string) => paintSymbolLatex(value.replace(/\*/g, ' \\cdot ').replace(/\^(\d+)/g, '^{$1}'), symbols);
+  if (expr.length > 280) return rough(expr);
   try {
-    let output = parse(expr).toTex();
-    for (const name of [...symbols].sort((a, b) => b.length - a.length)) {
-      const latex = symbolToLatex(name);
-      if (latex !== name) output = output.replace(new RegExp(`\\b${name}\\b`, 'g'), latex);
-    }
-    return output.replace(/theta/g, '\\theta');
+    return paintSymbolLatex(parse(expr).toTex(), symbols);
   } catch {
-    return expr.replace(/\^(\d+)/g, '^{$1}').replace(/theta/g, '\\theta');
+    return rough(expr);
   }
 }
 
