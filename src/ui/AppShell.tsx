@@ -5,7 +5,6 @@ import { PolarPhaseCanvas2D } from '../render2d/PolarPhaseCanvas2D';
 import { TraceDetMinimap } from '../render2d/TraceDetMinimap';
 import { HigherDimView } from '../render3d/HigherDimView';
 import { PhaseScene3D } from '../render3d/PhaseScene3D';
-import { exampleById } from '../examples/perkoExamples';
 import { useSystemStore } from '../store/useSystemStore';
 import { CoordinatesPanel } from './CoordinatesPanel';
 import { EquationPanel } from './EquationPanel';
@@ -13,8 +12,6 @@ import { EquilibriaPanel } from './EquilibriaPanel';
 import { ExampleGallery } from './ExampleGallery';
 import { hideObjects } from './filterAnalysis';
 import { ObjectTree } from './ObjectTree';
-import { prettyLabel } from './format';
-import { Katex } from './Katex';
 import { TheoremsPanel } from './TheoremsPanel';
 import { downloadPortrait } from './downloadPortrait';
 
@@ -39,11 +36,6 @@ function Portrait() {
   const tracePoint = useSystemStore((state) => state.tracePoint);
   const tracePolar = useSystemStore((state) => state.tracePolar);
   const setFlowMap = useSystemStore((state) => state.setFlowMap);
-  const toggleLayer = useSystemStore((state) => state.toggleLayer);
-  const toggleParticles = useSystemStore((state) => state.toggleParticles);
-  const setParticleMode = useSystemStore((state) => state.setParticleMode);
-  const toggleFlowMap = useSystemStore((state) => state.toggleFlowMap);
-  const setExtendedPhase = useSystemStore((state) => state.setExtendedPhase);
   const analysis = hideObjects(rawAnalysis, hiddenObjectIds);
 
   const showExtended = spec.dimension === 2 && !spec.isAutonomous && extendedPhase;
@@ -52,9 +44,17 @@ function Portrait() {
   const show2d = spec.dimension === 2 && !show3d;
   const showHigh = spec.dimension >= 4;
 
+  const polar = analysis.coordinateTransforms.polar2D;
+  const polarUseful = Boolean(polar?.isRecommended);
+
   return (
     <div className="portrait-page">
-      <div className="stage">
+      {showHigh ? (
+        <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} role="stacked" />
+      ) : (
+        <>
+          <h2>Phase portrait</h2>
+          <div className="stage">
         {showLine && <PhaseLine1D spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} />}
         {show2d && (
           <PhaseCanvas2D
@@ -91,92 +91,67 @@ function Portrait() {
             onTracePoint={tracePoint}
           />
         )}
-        {showHigh && <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} />}
-      </div>
-
-      <div className="portrait-tools">
-        {show2d && (
-          <button type="button" onClick={toggleParticles}>
-            {particles.playing ? 'Stop motion' : 'Move along the curves'}
-          </button>
-        )}
-        {show2d && particles.playing && (
-          <button type="button" onClick={() => setParticleMode(particles.mode === 'trueVelocity' ? 'uniformSpeed' : 'trueVelocity')}>
-            {particles.mode === 'trueVelocity' ? 'Speed follows the vector field' : 'Uniform speed'}
-          </button>
-        )}
-      </div>
-
-      {analysis.equilibria.length > 0 && (
-        <ul className="equilibrium-list">
-          {analysis.equilibria.map((eq) => (
-            <li key={eq.id}>
-              <Katex tex={eq.familyFormulaLatex || eq.coordsExactLatex?.join(', ') || eq.coords.map((value) => value.toPrecision(3)).join(', ')} />
-              <span>{prettyLabel(eq.classification2D ?? eq.classification3D ?? eq.stability)}</span>
-            </li>
-          ))}
-        </ul>
+          </div>
+        </>
       )}
 
-      {show2d && (
+      {show2d && polarUseful && (
         <section className="below">
           <h2>Polar coordinates</h2>
+          <p className="lede">
+            Distance r runs left to right. Angle θ runs upward. A vertical line is a circle in the phase portrait.
+          </p>
           <div className="stage polar-stage">
-            <PolarPhaseCanvas2D spec={spec} analysis={analysis} theme={theme} compiled={compiled} userOrbits={userOrbits} particles={particles} onTracePolar={tracePolar} />
+            <PolarPhaseCanvas2D
+              spec={spec}
+              analysis={analysis}
+              theme={theme}
+              compiled={compiled}
+              layers={layers}
+              hoverObjectId={hoverObjectId}
+              selectedObjectId={selectedObjectId}
+              userOrbits={userOrbits}
+              particles={particles}
+              onTracePolar={tracePolar}
+            />
           </div>
         </section>
       )}
+      {layers.timeSeries && spec.dimension < 4 && (
+        <section className="below">
+          <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} role="series" />
+        </section>
+      )}
+    </div>
+  );
+}
 
-      <section className="below">
-        <h2>What is drawn</h2>
-        <div className="check-list">
-          {(
-            [
-              ['streamlines', 'Trajectories'],
-              ['separatrices', 'Separatrices'],
-              ['manifoldsWuWs', 'Stable and unstable manifolds'],
-              ['centerManifoldWc', 'Center manifold'],
-              ['linearSubspaces', 'Eigenspaces'],
-              ['nullclines', 'Nullclines'],
-              ['limitCycles', 'Limit cycles'],
-              ['vectorField', 'Vector field arrows'],
-              ['basins', 'Basins'],
-              ['lyapunov', 'Lyapunov levels'],
-              ['hamiltonianContours', 'Hamiltonian levels'],
-              ['equilibria', 'Equilibria'],
-              ['timeSeries', 'Time series'],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key}>
-              <input type="checkbox" checked={layers[key]} onChange={() => toggleLayer(key)} /> {label}
-            </label>
-          ))}
-          {show2d && (
-            <label>
-              <input type="checkbox" checked={flowMap.active} onChange={toggleFlowMap} /> Flow of a small disk
-            </label>
-          )}
-          {spec.dimension === 2 && !spec.isAutonomous && (
-            <label>
-              <input type="checkbox" checked={extendedPhase} onChange={() => setExtendedPhase(!extendedPhase)} /> Extended phase space (x, y, t)
-            </label>
-          )}
+function Visualization() {
+  const spec = useSystemStore((state) => state.spec);
+  const layers = useSystemStore((state) => state.layers);
+  const particles = useSystemStore((state) => state.particles);
+  const theme = useSystemStore((state) => state.theme);
+  const analysis = useSystemStore((state) => state.analysis);
+  const toggleParticles = useSystemStore((state) => state.toggleParticles);
+  const showMotion = spec.dimension === 2 || spec.dimension === 3;
+  return (
+    <div className="side-stack">
+      {showMotion && (
+        <div className="button-row">
+          <button type="button" className={particles.playing ? 'real-button on' : 'real-button'} onClick={toggleParticles}>
+            {particles.playing ? 'Stop' : 'Play'}
+          </button>
         </div>
-        {layers.timeSeries && spec.dimension < 4 && (
-          <div className="stage polar-stage">
-            <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} />
-          </div>
-        )}
-        <ObjectTree />
-        <p className="note-exports">
-          <button type="button" className="text-button" onClick={() => void downloadPortrait('svg', spec, analysis, theme, layers)}>
-            Download SVG
-          </button>
-          <button type="button" className="text-button" onClick={() => void downloadPortrait('png', spec, analysis, theme, layers)}>
-            Download PNG
-          </button>
-        </p>
-      </section>
+      )}
+      <ObjectTree />
+      <p className="note-exports">
+        <button type="button" className="real-button" onClick={() => void downloadPortrait('svg', spec, analysis, theme, layers)}>
+          Download SVG
+        </button>
+        <button type="button" className="real-button" onClick={() => void downloadPortrait('png', spec, analysis, theme, layers)}>
+          Download PNG
+        </button>
+      </p>
     </div>
   );
 }
@@ -190,10 +165,12 @@ function Notes() {
 
   return (
     <div className="notes-page">
-      <section>
-        <h2>Equilibria</h2>
-        <EquilibriaPanel />
-      </section>
+      {analysis.equilibria.length > 0 && (
+        <section>
+          <h2>Equilibria</h2>
+          <EquilibriaPanel />
+        </section>
+      )}
       <section>
         <h2>Theorems</h2>
         <TheoremsPanel />
@@ -207,10 +184,24 @@ function Notes() {
           </div>
         </section>
       )}
-      <section>
-        <h2>Coordinates and integrals</h2>
-        <CoordinatesPanel />
-      </section>
+      <CoordinatesPanel />
+    </div>
+  );
+}
+
+function About() {
+  return (
+    <div className="system-page about-page">
+      <h1>About</h1>
+      <p>The goal of this site is to aid in the understanding of dynamical systems. I highly recommend first solving problems by hand and sketching by hand, and only later to use visualization tools.</p>
+      <p>
+        For any issues / questions / ideas you can email me at:{' '}
+        <a href="mailto:gregorio.jaca@gmail.com">gregorio.jaca@gmail.com</a>
+      </p>
+      <p>
+        To contribute, please check out{' '}
+        <a href="https://github.com/GregoJaca/dynamical-systems">https://github.com/GregoJaca/dynamical-systems</a>
+      </p>
     </div>
   );
 }
@@ -221,10 +212,8 @@ export function AppShell() {
   const setView = useSystemStore((state) => state.setView);
   const setTheme = useSystemStore((state) => state.setTheme);
   const copyShareLink = useSystemStore((state) => state.copyShareLink);
-  const exampleId = useSystemStore((state) => state.exampleId);
-  const spec = useSystemStore((state) => state.spec);
-  const example = exampleById(exampleId);
   const [notice, setNotice] = useState('');
+  const [studyTab, setStudyTab] = useState<'system' | 'picture' | 'notes'>('system');
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -241,26 +230,20 @@ export function AppShell() {
     window.setTimeout(() => setNotice(''), 1600);
   };
 
-  const title = example?.title ?? (spec.id === 'custom' ? 'Custom system' : 'System');
-
   return (
     <div className="app">
       <header className="topbar">
         <nav>
           <button type="button" className={view === 'system' ? 'current' : ''} onClick={() => setView('system')}>
-            System
-          </button>
-          <button type="button" className={view === 'portrait' ? 'current' : ''} onClick={() => setView('portrait')}>
-            Portrait
-          </button>
-          <button type="button" className={view === 'notes' ? 'current' : ''} onClick={() => setView('notes')}>
-            Notes
+            Home
           </button>
           <button type="button" className={view === 'examples' ? 'current' : ''} onClick={() => setView('examples')}>
             Examples
           </button>
+          <button type="button" className={view === 'about' ? 'current' : ''} onClick={() => setView('about')}>
+            About
+          </button>
         </nav>
-        <strong className="current-title">{title}</strong>
         <div className="top-actions">
           {notice && <span>{notice}</span>}
           <button type="button" className="text-button" onClick={() => void share()}>
@@ -271,17 +254,43 @@ export function AppShell() {
           </button>
         </div>
       </header>
-      <main>
+      <main className={view === 'portrait' ? 'study-main' : ''}>
         {view === 'system' && (
           <div className="system-page">
-            <h1>Define a system</h1>
-            <p className="lede">Write the right-hand side of each equation. A blank row adds a variable. Or start from an example.</p>
+            <h1>Nonlinear dynamical systems</h1>
+            <p className="lede">
+              Write a system here, or open Examples in the bar above. The name on the left of each row is the variable. Clearing an equation keeps the variable; Remove deletes it.
+            </p>
             <EquationPanel />
           </div>
         )}
-        {view === 'portrait' && <Portrait />}
-        {view === 'notes' && <Notes />}
+        {view === 'portrait' && (
+          <div className="study-grid">
+            <div className="study-picture">
+              <Portrait />
+            </div>
+            <aside className="study-side">
+              <div className="tabs">
+                <button type="button" className={studyTab === 'system' ? 'current' : ''} onClick={() => setStudyTab('system')}>
+                  System
+                </button>
+                <button type="button" className={studyTab === 'picture' ? 'current' : ''} onClick={() => setStudyTab('picture')}>
+                  Visualization
+                </button>
+                <button type="button" className={studyTab === 'notes' ? 'current' : ''} onClick={() => setStudyTab('notes')}>
+                  Notes
+                </button>
+              </div>
+              <div className="side-body">
+                {studyTab === 'system' && <EquationPanel />}
+                {studyTab === 'picture' && <Visualization />}
+                {studyTab === 'notes' && <Notes />}
+              </div>
+            </aside>
+          </div>
+        )}
         {view === 'examples' && <ExampleGallery />}
+        {view === 'about' && <About />}
       </main>
     </div>
   );

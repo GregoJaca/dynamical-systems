@@ -22,7 +22,7 @@ import type {
   ThemeMode,
   ViewportBounds,
 } from '../core/types';
-import { exampleToSpec, PERKO_EXAMPLES } from '../examples/perkoExamples';
+import { exampleToSpec } from '../examples/perkoExamples';
 import { compileSystemNumeric, tryParseSystem } from '../input/parser';
 import { decodeShareState, encodeShareState } from '../share/urlState';
 import { emptyAnalysis } from './emptyAnalysis';
@@ -30,8 +30,6 @@ import { mergeCas } from '../cas/mergeCas';
 import { computeLinearStreamlines, traceUserOrbit } from './orbits';
 import { primeWorkers, requestCas, requestNumeric } from './pipeline';
 import { parameterOverrides, toSnapshot, type SnapshotSource } from './snapshot';
-
-const DEFAULT_EXAMPLE_ID = 'saddle-separatrix';
 
 interface PublishOptions {
   reframe: boolean;
@@ -56,13 +54,13 @@ export interface SystemStore extends SnapshotSource {
   galleryOpen: boolean;
   extendedPhase: boolean;
   draftVars: string[];
-  view: 'system' | 'portrait' | 'notes' | 'examples';
+  view: 'system' | 'portrait' | 'notes' | 'examples' | 'about';
   boot: () => void;
   loadSnapshot: (snapshot: ShareSnapshot) => void;
   loadExample: (example: PerkoExample) => void;
   setDraftRow: (index: number, value: string) => void;
   setSystem: (vars: string[], rows: string[]) => void;
-  setView: (view: 'system' | 'portrait' | 'notes' | 'examples') => void;
+  setView: (view: 'system' | 'portrait' | 'notes' | 'examples' | 'about') => void;
   setMode: (mode: SystemMode) => void;
   setDimension: (dimension: number) => void;
   setParameterValue: (name: string, value: number) => void;
@@ -93,6 +91,7 @@ export interface SystemStore extends SnapshotSource {
 
 let revisionCounter = 0;
 let hashSuspended = 0;
+let explicitShare = false;
 let hashTimer: ReturnType<typeof setTimeout> | null = null;
 let casTimer: ReturnType<typeof setTimeout> | null = null;
 let linearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -113,17 +112,19 @@ function paintTheme(theme: ThemeMode) {
   document.body.dataset.theme = theme;
 }
 
-function writeHash(state: SnapshotSource) {
+function writeHash(state: SnapshotSource & { view: 'system' | 'portrait' | 'notes' | 'examples' | 'about' }) {
   if (typeof window === 'undefined' || hashSuspended > 0) return;
-  const hash = encodeShareState(toSnapshot(state));
-  if (window.location.hash === hash) return;
   const url = new URL(window.location.href);
+  if (state.view !== 'portrait' && !explicitShare) {
+    if (!url.hash) return;
+    url.hash = '';
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+    return;
+  }
+  const hash = encodeShareState(toSnapshot(state));
+  if (url.hash === hash) return;
   url.hash = hash;
   window.history.replaceState(null, '', url);
-}
-
-function defaultExample(): PerkoExample {
-  return PERKO_EXAMPLES.find((example) => example.id === DEFAULT_EXAMPLE_ID) ?? PERKO_EXAMPLES[0]!;
 }
 
 function defaultVars(dimension: number): string[] {
@@ -236,15 +237,14 @@ function editorVarsFor(mode: SystemMode, stateVars: string[], rowCount: number):
   return defaultVars(rowCount);
 }
 
-function createInitial(): { spec: SystemSpec; draftRows: string[]; draftVars: string[]; exampleId: string; parseError: string | null } {
-  const example = defaultExample();
-  const built = specFromExample(example, nextRevision());
+function createInitial(): { spec: SystemSpec; draftRows: string[]; draftVars: string[]; exampleId: string | null; parseError: string | null } {
+  const vars = ['x', 'y'];
   return {
-    spec: built.spec,
-    draftRows: [...example.rows],
-    draftVars: editorVarsFor(example.mode, example.stateVars, example.rows.length),
-    exampleId: example.id,
-    parseError: built.error,
+    spec: manualSpec('blank', nextRevision(), 'autonomous', 2, vars, ['0', '0'], {}),
+    draftRows: ['', ''],
+    draftVars: vars,
+    exampleId: null,
+    parseError: null,
   };
 }
 
@@ -263,7 +263,7 @@ const initialFlow: FlowMapState = {
   playing: false,
 };
 
-const initialParticles: ParticleSettings = { playing: false, mode: 'uniformSpeed', count: 36 };
+const initialParticles: ParticleSettings = { playing: false, mode: 'trueVelocity', count: 36 };
 
 export const useSystemStore = create<SystemStore>((set, get) => {
   const applyCas = (enrichment: CasEnrichment) => {
@@ -514,7 +514,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       viewportLocked: snapshot.viewportLocked,
       layers: { ...snapshot.layers },
       theme: snapshot.theme,
-      particles: { ...get().particles, playing: snapshot.particlesPlaying, mode: snapshot.particleMode },
+      particles: { ...get().particles, playing: snapshot.particlesPlaying, mode: 'trueVelocity' },
       inspectorTab: snapshot.inspectorTab,
       selectedEquilibriumId: snapshot.selectedEquilibriumId,
       selectedObjectId: snapshot.selectedEquilibriumId,
@@ -591,7 +591,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
         } finally {
           hashSuspended -= 1;
         }
-      } else {
+      } else if (get().draftRows.every((row) => row.trim().length > 0)) {
         scheduleNumeric(get().spec, { reframe: true, freezeViewport: false, layers: 'reset' });
         scheduleCas(true);
       }
@@ -684,7 +684,10 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       });
     },
 
-    setView: (view) => set({ view }),
+    setView: (view) => {
+      if (view !== 'portrait') explicitShare = false;
+      set({ view });
+    },
 
     setMode: (mode) => {
       const spec = get().spec;
@@ -798,8 +801,8 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       set({ theme });
     },
 
-    setParticleMode: (mode) => {
-      set({ particles: { ...get().particles, mode } });
+    setParticleMode: () => {
+      set({ particles: { ...get().particles, mode: 'trueVelocity' } });
     },
 
     toggleParticles: () => {
@@ -911,6 +914,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
         clearTimeout(hashTimer);
         hashTimer = null;
       }
+      explicitShare = true;
       writeHash(get());
       if (typeof window === 'undefined') return encodeShareState(toSnapshot(get()));
       return window.location.href;

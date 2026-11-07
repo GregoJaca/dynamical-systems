@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, Gauge, Image, Link2, Moon, Pause, Play, Spline, Sun } from 'lucide-react';
+import { Download, Image, Link2, Moon, Pause, Play, Spline, Sun } from 'lucide-react';
 import type { LayerVisibility } from '../core/types';
 import { useSystemStore } from '../store/useSystemStore';
 import { downloadPortrait } from './downloadPortrait';
@@ -37,7 +37,6 @@ export function ViewportToolbar({
   const toggleLayer = useSystemStore((state) => state.toggleLayer);
   const setTheme = useSystemStore((state) => state.setTheme);
   const toggleParticles = useSystemStore((state) => state.toggleParticles);
-  const setParticleMode = useSystemStore((state) => state.setParticleMode);
   const toggleFlowMap = useSystemStore((state) => state.toggleFlowMap);
   const setFlowMap = useSystemStore((state) => state.setFlowMap);
   const setExtendedPhase = useSystemStore((state) => state.setExtendedPhase);
@@ -65,17 +64,8 @@ export function ViewportToolbar({
           Inspector
         </button>
         <span className="mx-1 h-4 w-px bg-slate-400/30" />
-        <button type="button" className="rounded-full p-1.5" onClick={toggleParticles} aria-label={particles.playing ? 'Pause particles' : 'Play particles'} title="Animated particles">
+        <button type="button" className="rounded-full p-1.5" onClick={toggleParticles} aria-label={particles.playing ? 'Stop' : 'Play'} title="Animated particles">
           {particles.playing ? <Pause size={16} /> : <Play size={16} />}
-        </button>
-        <button
-          type="button"
-          className={`rounded-full px-2 py-1 text-xs ${particles.mode === 'trueVelocity' ? 'bg-[#f0b429]/20 text-[#f0b429]' : ''}`}
-          onClick={() => setParticleMode(particles.mode === 'trueVelocity' ? 'uniformSpeed' : 'trueVelocity')}
-          title="Particle speed"
-        >
-          <Gauge size={14} className="mr-1 inline" />
-          {particles.mode === 'trueVelocity' ? '||f||' : 'Uniform'}
         </button>
         <button type="button" className={`rounded-full px-2 py-1 text-xs ${flowMap.active ? 'bg-[#f0b429]/20 text-[#f0b429]' : ''}`} onClick={toggleFlowMap} title="Flow map droplet">
           <Spline size={14} className="mr-1 inline" />

@@ -92,14 +92,15 @@ export function EquationPanel() {
   };
 
   const parameters = Object.values(spec.parameters);
-  const status = parseError ? parseError : numericStatus === 'running' ? 'Computing the portrait…' : spec.isLinear ? 'Linear' : 'Nonlinear';
+  const missingEquation = draftRows.some((row) => row.trim().length === 0) || draftVars.some((name) => name.trim().length === 0);
+  const status = parseError ? parseError : missingEquation ? 'Write each right-hand side. Remove deletes a variable.' : numericStatus === 'running' ? 'Computing the portrait…' : spec.isLinear ? 'Linear' : 'Nonlinear';
 
   return (
     <form
       className="system-form"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!parseError) setView('portrait');
+        if (!parseError && !missingEquation) setView('portrait');
       }}
     >
       <div className="system-brace">
@@ -131,13 +132,6 @@ export function EquationPanel() {
                 onChange={(event) => {
                   const rows = [...draftRows];
                   rows[index] = event.target.value;
-                  if (!event.target.value.trim() && draftRows.length > 1) {
-                    commit(
-                      draftVars.filter((_, variableIndex) => variableIndex !== index),
-                      rows.filter((_, rowIndex) => rowIndex !== index),
-                    );
-                    return;
-                  }
                   commit(draftVars, rows);
                 }}
               />
@@ -211,11 +205,8 @@ export function EquationPanel() {
       </details>
 
       <div className="actions">
-        <button type="submit" disabled={Boolean(parseError)}>
+        <button type="submit" disabled={Boolean(parseError) || missingEquation}>
           Study this system
-        </button>
-        <button type="button" className="text-button" onClick={() => setView('examples')}>
-          Examples
         </button>
       </div>
     </form>
