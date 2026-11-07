@@ -33,7 +33,7 @@ function traceCurve(
   kind: 'Ws' | 'Wu',
   viewport: ViewportBounds,
 ): ManifoldSurface3D {
-  const trajectories = ([1, -1] as const).map((sign) => shoot(compiled, eq.coords, direction.map((value) => sign * value), kind, viewport, 1e-3));
+  const trajectories = ([1, -1] as const).map((sign) => shoot(compiled, eq.coords, direction.map((value) => sign * value), kind, viewport));
   return {
     id: `${eq.id}-${kind}-curve`,
     equilibriumId: eq.id,
@@ -59,7 +59,7 @@ function traceRibbon(
   for (let k = 0; k < count; k += 1) {
     const angle = (2 * Math.PI * k) / count;
     const direction = first.map((value, index) => epsilon * (Math.cos(angle) * value + Math.sin(angle) * (second[index] ?? 0)));
-    trajectories.push(shoot(compiled, eq.coords, direction, kind, viewport, lengthScale));
+    trajectories.push(shoot(compiled, eq.coords, direction, kind, viewport));
   }
   const vertices: number[] = [];
   const indices: number[] = [];
@@ -92,7 +92,6 @@ function shoot(
   offset: number[],
   kind: 'Ws' | 'Wu',
   viewport: ViewportBounds,
-  _lengthScale: number,
 ): number[][] {
   const seed = origin.map((value, index) => value + (offset[index] ?? 0));
   const result = integrateRK45({
