@@ -272,11 +272,25 @@ def _greek_latex(text: str) -> str:
     return text
 
 
+def _is_one(expr: sp.Expr) -> bool:
+    simplified = sp.simplify(expr)
+    if simplified == 1:
+        return True
+    rendered = lx(simplified)
+    if rendered in {"1", "1.0", "+1"}:
+        return True
+    try:
+        value = complex(simplified.evalf(20))
+        return abs(value.real - 1) < 1e-9 and abs(value.imag) < 1e-9
+    except Exception:
+        return False
+
+
 def _unit_coefficient(coeff: sp.Expr) -> str:
     simplified = sp.simplify(coeff)
-    if simplified == 1:
+    if _is_one(simplified):
         return ""
-    if simplified == -1:
+    if _is_one(-simplified):
         return "-"
     return lx(simplified)
 
@@ -311,7 +325,7 @@ def _poly_latex(expr: sp.Expr, var: sp.Symbol, atom: str) -> str:
         power = exponents[0]
         if power == 0:
             body = lx(magnitude)
-        elif magnitude == 1:
+        elif _is_one(magnitude):
             body = atom if power == 1 else f"{atom}^{{{power}}}"
         else:
             variable = atom if power == 1 else f"{atom}^{{{power}}}"
@@ -955,20 +969,27 @@ def _cartesian_formula(prefix: str, vectors: list[sp.Matrix], origin: sp.Matrix,
         if is_zero(direction[1]):
             return rf"{prefix}: {names[1]}={lx(origin[1])}"
         slope = sp.simplify(direction[1] / direction[0])
-        return rf"{prefix}: {_coord_shift(names[1], origin[1])}={lx(slope)}{_coord_shift(names[0], origin[0])}"
+        return rf"{prefix}: {_coord_shift(names[1], origin[1])}={_unit_coefficient(slope)}{_coord_shift(names[0], origin[0])}"
     if dimension == 3 and len(vectors) == 2:
         normal = vectors[0].cross(vectors[1])
         terms = []
         for component, name, star in zip(normal, names, origin):
             if is_zero(component):
                 continue
-            terms.append(rf"{lx(component)}\left({name}-{lx(star)}\right)")
+            terms.append(rf"{_unit_coefficient(component)}\left({name}-{lx(star)}\right)")
         equation = "+".join(terms) if terms else "0"
         return rf"{prefix}: {equation}=0"
     if len(vectors) == 1:
         pieces = []
         for component, name, star in zip(vectors[0], names, origin):
-            pieces.append(rf"{name}={lx(star)}+t{lx(component)}")
+            coeff = _unit_coefficient(component)
+            if coeff == "-":
+                term = "-t"
+            elif coeff == "":
+                term = "+t"
+            else:
+                term = f"+{coeff}t"
+            pieces.append(rf"{name}={lx(star)}{term}")
         return rf"{prefix}: " + ", ".join(pieces)
     basis = ", ".join(_column_latex(vector) for vector in vectors)
     return rf"{prefix}={lx(sp.Matrix(origin))}+\mathrm{{span}}\{{{basis}\}}"

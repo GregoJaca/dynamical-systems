@@ -38,6 +38,13 @@ export function eigenvalueLatex(eq: EquilibriumAnalysis): string {
     .join(', ');
 }
 
+function tex(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/^(\$|\\\(|\\\[)/.test(trimmed)) return trimmed;
+  return `$${trimmed}$`;
+}
+
 function dimensionOf(analysis: NumericAnalysis, context?: TheoremContext): number {
   if (context?.dimension && context.dimension > 0) return context.dimension;
   return analysis.equilibria[0]?.coords.length ?? (analysis.coordinateTransforms.cylindrical3D || analysis.coordinateTransforms.spherical3D ? 3 : 2);
@@ -112,7 +119,7 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
   if (autonomous && hyperbolic.length > 0) {
     const descriptions = hyperbolic.slice(0, 4).map((eq) => {
       const spectrum = eigenvalueLatex(eq);
-      return `${equilibriumLatex(eq)} with eigenvalues ${spectrum || '\\lambda'}`;
+      return `${tex(equilibriumLatex(eq))} with eigenvalues ${tex(spectrum || '\\lambda')}`;
     });
     results.push(
       theorem(
@@ -125,8 +132,8 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
     );
     const saddleNote =
       saddles.length > 0
-        ? `Saddles ${listEquilibria(saddles)} have immersed stable and unstable manifolds tangent to $E^{s}$ and $E^{u}$.`
-        : `At ${listEquilibria(hyperbolic)} the stable or unstable manifold fills a neighborhood of the equilibrium.`;
+        ? `Saddles ${tex(listEquilibria(saddles))} have immersed stable and unstable manifolds tangent to $E^{s}$ and $E^{u}$.`
+        : `At ${tex(listEquilibria(hyperbolic))} the stable or unstable manifold fills a neighborhood of the equilibrium.`;
     results.push(
       theorem(
         'stable-unstable-manifolds',
@@ -146,14 +153,14 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
       .filter((branch) => branch.kind === 'Wc' && branch.reducedDynamicsLatex)
       .slice(0, 3)
       .map((branch) => branch.reducedDynamicsLatex);
-    const reductionText = reductions.length > 0 ? ` Reduced dynamics: ${reductions.join('; ')}.` : '';
+    const reductionText = reductions.length > 0 ? ` Reduced dynamics: ${reductions.map((item) => tex(item ?? '')).join('; ')}.` : '';
     results.push(
       theorem(
         'center-manifold',
         'Local Center Manifold Theorem',
         'Perko §2.12',
         'If $Df(x^{*})$ has $n_{c}$ eigenvalues of zero real part, there is a local center manifold $W^{c}$ of dimension $n_{c}$, tangent to $E^{c}$, and the stability of $x^{*}$ is determined by the reduced flow on $W^{c}$.',
-        `Non-hyperbolic equilibria ${listEquilibria(subjects)} admit a local center manifold.${reductionText}`,
+        `Non-hyperbolic equilibria ${tex(listEquilibria(subjects))} admit a local center manifold.${reductionText}`,
       ),
     );
   }
@@ -172,7 +179,7 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
         "Lyapunov Stability and LaSalle's Invariance Principle",
         'Perko §2.9',
         'If $V$ is positive definite and $\\dot V$ is negative definite, then $x^{*}$ is asymptotically stable. If $\\dot V \\le 0$, every orbit starting near $x^{*}$ approaches the largest invariant set inside $\\{\\dot V = 0\\}$.',
-        `Take $V = ${lyapunov.vLatex}$. Then $\\dot V = ${lyapunov.vDotLatex}$, which is ${verdict}. ${lyapunov.conclusionLatex}`,
+        `Take ${tex(lyapunov.vLatex)}. Then ${tex(lyapunov.vDotLatex)}, which is ${verdict}. ${lyapunov.conclusionLatex}`,
       ),
     );
   }
@@ -185,8 +192,8 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
         'Andronov–Leontovich Nilpotent Classification',
         'Perko §2.11',
         'A planar equilibrium whose linear part is zero or nilpotent is topologically a cusp, saddle-node, or a focus/center according to the first nonvanishing jet of its orbital normal form.',
-        `The classification applies at ${listEquilibria(nilpotent)}. ${nilpotent
-          .map((eq) => `${equilibriumLatex(eq)} is a ${eq.classification2D?.replaceAll('_', ' ') ?? 'non-hyperbolic point'}`)
+        `The classification applies at ${tex(listEquilibria(nilpotent))}. ${nilpotent
+          .map((eq) => `${tex(equilibriumLatex(eq))} is a ${eq.classification2D?.replaceAll('_', ' ') ?? 'non-hyperbolic point'}`)
           .join('; ')}.`,
       ),
     );
@@ -204,7 +211,7 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
         'Time-Reversible Center Theorem',
         'Perko §2.10',
         'If $\\dot x = f(x)$ is $R$-reversible and $x^{*} \\in \\mathrm{Fix}(R)$ is a linear center, then $x^{*}$ is a nonlinear center: a neighborhood is filled with periodic orbits.',
-        `The field is reversible under ${formulas}. ${listEquilibria(reversibleCenters)} lies on the fixed-point axis and is a center, so the linear center survives the nonlinear terms.`,
+        `The field is reversible under ${tex(formulas)}. ${tex(listEquilibria(reversibleCenters))} lies on the fixed-point axis and is a center, so the linear center survives the nonlinear terms.`,
       ),
     );
   }
@@ -215,13 +222,15 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
       .map((cycle) => cycle.formulaLatex ?? (cycle.radius !== undefined ? `r = ${num(cycle.radius)}` : cycle.id));
     const radial = analysis.coordinateTransforms.polar2D?.radialEquilibriaR.filter((radius) => radius > 1e-5).map((radius) => num(radius)) ?? [];
     const description = cycles.length > 0 ? cycles.join('; ') : radial.map((radius) => `r = ${radius}`).join(', ');
+    const orbit = description || 'detected by the radial equation';
+    const orbitText = /[=\\]/.test(orbit) ? tex(orbit) : orbit;
     results.push(
       theorem(
         'poincare-bendixson',
         'Poincaré–Bendixson Theorem',
         'Perko §3.7',
         'A nonempty compact limit set of a planar $C^{1}$ flow that contains no equilibrium is a periodic orbit.',
-        `The planar phase portrait contains the periodic orbit ${description || 'detected by the radial equation'}.`,
+        `The planar phase portrait contains the periodic orbit ${orbitText}.`,
       ),
     );
   }
@@ -234,7 +243,7 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
         'Bendixson–Dulac Criterion',
         'Perko §3.9',
         'If $B$ is $C^{1}$ on a simply connected region $D$ and $\\nabla\\cdot(Bf)$ does not change sign and is not identically zero, then $D$ contains no periodic orbit.',
-        `With multiplier $${dulac.multiplierLatex}$, one has $\\nabla\\cdot(Bf) = ${dulac.divergenceProductLatex}$. ${dulac.conclusion}`,
+        `With multiplier ${tex(dulac.multiplierLatex)}, one has ${tex(`\\nabla\\cdot(Bf) = ${dulac.divergenceProductLatex}`)}. ${dulac.conclusion}`,
       ),
     );
   }
@@ -251,8 +260,8 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
         'Perko §3.12',
         'The Poincaré index of a closed orbit is $+1$, and it equals the sum of the indices of the equilibria in its interior. A saddle has index $-1$; a node, focus, or center has index $+1$; a cusp or saddle-node has index $0$.',
         indexed.length > 0
-          ? `Computed indices: ${indexed.join(', ')}.`
-          : `The theorem constrains every periodic orbit of this planar system by the equilibria ${listEquilibria(analysis.equilibria)}.`,
+          ? `Computed indices: ${indexed.map((item) => tex(item)).join(', ')}.`
+          : `The theorem constrains every periodic orbit of this planar system by the equilibria ${tex(listEquilibria(analysis.equilibria))}.`,
       ),
     );
   }

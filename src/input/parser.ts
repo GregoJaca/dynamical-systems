@@ -361,18 +361,34 @@ function collectSymbols(node: MathNode, into: Set<string>): void {
 }
 
 function expressionToLatex(expr: string, symbols: string[]): string {
-  let tex = parse(expr).toTex();
-  const ordered = [...symbols].sort((a, b) => b.length - a.length);
+  return paintSymbolLatex(parse(expr).toTex(), symbols);
+}
+
+export function paintSymbolLatex(tex: string, symbols: string[]): string {
+  let output = tex;
+  const greekNames = Object.keys(GREEK).sort((a, b) => b.length - a.length);
+  for (const name of greekNames) {
+    const command = GREEK[name] ?? name;
+    output = output.replaceAll(`\\mathrm{${name}}`, command);
+    output = output.replaceAll(`\\operatorname{${name}}`, command);
+    output = output.replaceAll(`\\text{${name}}`, command);
+    output = output.replace(new RegExp(`(?<![A-Za-z\\\\])\\{${name}\\}(?![A-Za-z])`, 'g'), command);
+    output = output.replace(new RegExp(`(?<![A-Za-z\\\\])${name}(?![A-Za-z])`, 'g'), command);
+  }
+  const ordered = [...new Set(symbols)].sort((a, b) => b.length - a.length);
   for (const name of ordered) {
+    if (GREEK[name]) continue;
     const latex = symbolToLatex(name);
     if (latex === name) continue;
-    tex = tex.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, 'g'), latex);
+    output = output.replaceAll(`\\mathrm{${name}}`, latex);
+    output = output.replaceAll(`\\operatorname{${name}}`, latex);
+    output = output.replace(new RegExp(`(?<![A-Za-z\\\\{])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'g'), latex);
   }
-  return tex;
+  return output;
 }
 
 export function symbolToLatex(name: string): string {
-  return GREEK[name] ?? name;
+  return GREEK[name] ?? (/^[A-Za-z]$/.test(name) ? name : `\\mathrm{${name}}`);
 }
 
 function resolveStateVars(requested: string[] | undefined, dimension: number): string[] {

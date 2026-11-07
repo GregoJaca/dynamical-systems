@@ -1,4 +1,6 @@
 import type { EquilibriumAnalysis, NumericAnalysis, SystemSpec } from '../core/types';
+import { parse } from 'mathjs';
+import { paintSymbolLatex, symbolToLatex } from '../input/parser';
 import { applicableTheorems, eigenvalueLatex, equilibriumLatex } from './theoremRegistry';
 
 function num(value: number): string {
@@ -15,7 +17,19 @@ function systemDisplay(analysis: NumericAnalysis, spec?: WorkedSpec): string {
   const names = spec?.stateVars ?? [];
   const rhs = spec?.rhsExpressions ?? [];
   if (names.length > 0 && rhs.length === names.length) {
-    return names.map((name, index) => `\\dot ${name} = ${rhs[index]}`).join(' \\\\\n');
+    const symbols = [...names];
+    return names
+      .map((name, index) => {
+        const expr = rhs[index] ?? '0';
+        let rendered = expr;
+        try {
+          rendered = paintSymbolLatex(parse(expr).toTex(), symbols);
+        } catch {
+          rendered = paintSymbolLatex(expr, symbols);
+        }
+        return `\\dot{${symbolToLatex(name)}} = ${rendered}`;
+      })
+      .join(' \\\\\n');
   }
   if (analysis.global.symbolicJacobianLatex) {
     return `J(x) = ${analysis.global.symbolicJacobianLatex}`;
@@ -56,12 +70,8 @@ export function buildWorkedSolutionLatex(analysis: NumericAnalysis, spec?: Worke
     `\\[\\begin{aligned}\n${systemDisplay(analysis, spec)}\n\\end{aligned}\\]`,
   ];
   if (spec?.isLinear) sections.push('The vector field is linear, so the phase portrait is determined by the Jordan form of $A$.');
-  if (spec?.isAutonomous === false) sections.push('The system is non-autonomous, so the symbolic engine does not apply the planar autonomous theorems.');
-
-  sections.push('\\subsection*{Equilibria and linearization}');
-  if (analysis.equilibria.length === 0) {
-    sections.push('No equilibrium was found in the searched region.');
-  } else {
+  if (analysis.equilibria.length > 0) {
+    sections.push('\\subsection*{Equilibria and linearization}');
     sections.push('\\begin{enumerate}');
     for (const eq of analysis.equilibria) sections.push(equilibriumBlock(eq));
     sections.push('\\end{enumerate}');
@@ -75,10 +85,8 @@ export function buildWorkedSolutionLatex(analysis: NumericAnalysis, spec?: Worke
   }
 
   const manifolds = analysis.manifolds.filter((branch) => branch.taylorSeriesLatex || branch.reducedDynamicsLatex);
-  sections.push('\\subsection*{Invariant manifolds}');
-  if (manifolds.length === 0) {
-    sections.push('No symbolic manifold expansion was attached to this analysis.');
-  } else {
+  if (manifolds.length > 0) {
+    sections.push('\\subsection*{Invariant manifolds}');
     sections.push('\\begin{itemize}');
     for (const branch of manifolds) {
       const formula = branch.taylorSeriesLatex ?? '';
@@ -108,34 +116,32 @@ export function buildWorkedSolutionLatex(analysis: NumericAnalysis, spec?: Worke
     const dulac = analysis.global.bendixsonDulac;
     globalLines.push(`Bendixson–Dulac multiplier $${dulac.multiplierLatex}$, and $\\nabla\\cdot(Bf) = ${dulac.divergenceProductLatex}$. ${dulac.conclusion}.`);
   }
-  if (analysis.global.lyapunov) {
+  if (analysis.global.lyapunov && analysis.global.lyapunov.classification !== 'indefinite') {
     const lyapunov = analysis.global.lyapunov;
-    globalLines.push(`Lyapunov function ($\\mathrm{${lyapunov.source}}$): $V = ${lyapunov.vLatex}$, $\\dot V = ${lyapunov.vDotLatex}$. ${lyapunov.conclusionLatex}`);
+    globalLines.push(`Lyapunov function ($\\mathrm{${lyapunov.source}}$): $${lyapunov.vLatex}$, $${lyapunov.vDotLatex}$. ${lyapunov.conclusionLatex}`);
   }
   const polar = analysis.coordinateTransforms.polar2D;
-  if (polar) {
+  if (polar?.isRecommended) {
     globalLines.push(
-      `Polar form: $\\dot r = ${polar.rDotLatex}$, $\\dot\\theta = ${polar.thetaDotLatex}$.${polar.isRecommended ? ` Recommended: ${polar.recommendationReason ?? 'polar coordinates simplify the field'}.` : ''}`,
+      `Polar form: $${polar.rDotLatex}$, $${polar.thetaDotLatex}$.${polar.isRecommended ? ` Recommended: ${polar.recommendationReason ?? 'polar coordinates simplify the field'}.` : ''}`,
     );
   }
   const cylindrical = analysis.coordinateTransforms.cylindrical3D;
   if (cylindrical) {
     globalLines.push(
-      `Cylindrical form: $\\dot r = ${cylindrical.rDotLatex}$, $\\dot\\theta = ${cylindrical.thetaDotLatex}$, $\\dot z = ${cylindrical.zDotLatex}$.`,
+      `Cylindrical form: $${cylindrical.rDotLatex}$, $${cylindrical.thetaDotLatex}$, $${cylindrical.zDotLatex}$.`,
     );
   }
   const spherical = analysis.coordinateTransforms.spherical3D;
   if (spherical) {
     globalLines.push(
-      `Spherical form: $\\dot\\rho = ${spherical.rhoDotLatex}$, $\\dot\\theta = ${spherical.thetaDotLatex}$, $\\dot\\phi = ${spherical.phiDotLatex}$.`,
+      `Spherical form: $${spherical.rhoDotLatex}$, $${spherical.thetaDotLatex}$, $${spherical.phiDotLatex}$.`,
     );
   }
   sections.push(globalLines.join('\n\n'));
 
-  sections.push('\\subsection*{Theorems used}');
-  if (theorems.length === 0) {
-    sections.push('No theorem from the registry applies to the computed objects.');
-  } else {
+  if (theorems.length > 0) {
+    sections.push('\\subsection*{Theorems used}');
     sections.push('\\begin{enumerate}');
     for (const item of theorems) {
       sections.push(

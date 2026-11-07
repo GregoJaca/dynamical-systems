@@ -492,7 +492,7 @@ export function seriesMonomialLatex(coeffs: number[], variable: string): string 
     if (power < 1 || Math.abs(coeff) < 1e-8) return;
     const sign = coeff < 0 ? '-' : terms.length ? '+' : '';
     const mag = latexNumber(Math.abs(coeff));
-    const showMag = mag === '1' ? '' : mag;
+    const showMag = mag === '1' || mag === '1.0' ? '' : mag;
     const body = power === 1 ? `${showMag}${variable}` : `${showMag}${variable}^{${power}}`;
     terms.push(`${sign}${body}`);
   });

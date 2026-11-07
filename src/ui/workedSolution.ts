@@ -8,7 +8,7 @@ export interface SolutionSection {
 
 function equilibriumBlock(eq: EquilibriumAnalysis): string {
   const lines = [
-    `\\[${eq.id}:\\ ${coordList(eq.coords, eq.coordsExactLatex)}\\]`,
+    `\\[${coordList(eq.coords, eq.coordsExactLatex)}\\]`,
     eq.familyFormulaLatex ? `Family: \\(${eq.familyFormulaLatex}\\)` : '',
     `\\[J = ${eq.jacobianExactLatex || matrixLatex(eq.jacobianNumeric)}\\]`,
     `\\[\\operatorname{tr} J = ${eq.trace.exactLatex || rationalLabel(eq.trace.value)},\\quad \\det J = ${eq.determinant.exactLatex || rationalLabel(eq.determinant.value)}\\]`,
@@ -58,12 +58,12 @@ export function workedSections(spec: SystemSpec, analysis: NumericAnalysis): Sol
     analysis.global.hamiltonianLatex
       ? `\\[${analysis.global.hamiltonianLatex.trim().startsWith('H') ? analysis.global.hamiltonianLatex : `H = ${analysis.global.hamiltonianLatex}`}\\]`
       : '',
-    analysis.global.potentialFunctionLatex ? `\\[V = ${analysis.global.potentialFunctionLatex}\\]` : '',
+    analysis.global.potentialFunctionLatex ? `\\[${analysis.global.potentialFunctionLatex}\\]` : '',
     analysis.global.lyapunov
-      ? `\\[V = ${analysis.global.lyapunov.vLatex},\\quad \\dot V = ${analysis.global.lyapunov.vDotLatex}\\]\n${analysis.global.lyapunov.conclusionLatex}`
+      ? `\\[${analysis.global.lyapunov.vLatex},\\quad ${analysis.global.lyapunov.vDotLatex}\\]\n${analysis.global.lyapunov.conclusionLatex}`
       : '',
     analysis.global.bendixsonDulac?.applies
-      ? `\\[B = ${analysis.global.bendixsonDulac.multiplierLatex},\\quad \\nabla\\cdot(Bf) = ${analysis.global.bendixsonDulac.divergenceProductLatex}\\]\n${analysis.global.bendixsonDulac.conclusion}`
+      ? `\\[${analysis.global.bendixsonDulac.multiplierLatex},\\quad \\nabla\\cdot(Bf) = ${analysis.global.bendixsonDulac.divergenceProductLatex}\\]\n${analysis.global.bendixsonDulac.conclusion}`
       : '',
     analysis.global.linearSystemExact
       ? `\\[e^{At} = ${analysis.global.linearSystemExact.matrixExponentialLatex}\\]\n\\[${analysis.global.linearSystemExact.generalSolutionLatex}\\]`
@@ -78,7 +78,7 @@ export function workedSections(spec: SystemSpec, analysis: NumericAnalysis): Sol
       latex: analysis.global.applicableTheorems
         .map(
           (theorem) =>
-            `\\paragraph{${theorem.name} (${theorem.perkoReference})}\n\\[${theorem.statementLatex}\\]\n\\[${theorem.applicationToSystemLatex}\\]`,
+            `${theorem.name} (${theorem.perkoReference})\n${theorem.statementLatex}\n${theorem.applicationToSystemLatex}`,
         )
         .join('\n\n'),
     });
