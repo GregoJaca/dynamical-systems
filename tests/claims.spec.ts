@@ -20,6 +20,16 @@ describe('claims that have to be exact', () => {
     expect(saddleKind === 'strict_lyapunov' || saddleKind === 'weak_lyapunov_lasalle').toBe(false);
   }, 60_000);
 
+  it('writes the saddle separatrix as y = x^2/3', () => {
+    const example = PERKO_EXAMPLES.find((item) => item.id === 'saddle-separatrix');
+    if (!example) throw new Error('missing example');
+    const formulas = analyzeNumeric(exampleToSpec(example)).manifolds.map((branch) => branch.taylorSeriesLatex).join(' ');
+    expect(formulas).toContain('\\frac{1}{3}');
+    expect(formulas).toContain('x^{2}');
+    expect(formulas).not.toContain('v =');
+    expect(formulas).not.toMatch(/\d+\.\d{3,}/);
+  }, 60_000);
+
   it('prints square roots and scales an eigenvector to small integers', () => {
     expect(latexNumber(Math.sqrt(2) / 2)).toBe('\\frac{\\sqrt{2}}{2}');
     expect(normalize([Math.SQRT1_2, Math.SQRT1_2])).toEqual([1, 1]);

@@ -3,16 +3,7 @@ import { latexNumber } from '../numeric/algebra';
 
 export function rationalLabel(value: number): string {
   if (!Number.isFinite(value)) return '—';
-  const sign = value < 0 ? '-' : '';
-  const abs = Math.abs(value);
-  if (Math.abs(abs - Math.round(abs)) < 1e-8) return `${sign}${Math.round(abs).toString()}`;
-  for (let denominator = 1; denominator <= 16; denominator += 1) {
-    const numerator = Math.round(abs * denominator);
-    if (Math.abs(abs - numerator / denominator) < 1e-6) {
-      return denominator === 1 ? `${sign}${numerator.toString()}` : `${sign}${numerator.toString()}/${denominator.toString()}`;
-    }
-  }
-  return `${sign}${Number(abs.toPrecision(4)).toString()}`;
+  return latexNumber(value).replace(/\\sqrt\{([^{}]+)\}/g, '√$1').replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '$1/$2');
 }
 
 export function parseUserNumber(text: string): number | null {

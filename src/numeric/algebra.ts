@@ -75,6 +75,38 @@ export function rationalize(value: number, maxDen = 12): { n: number; d: number 
   return null;
 }
 
+/** Nearest simple fraction or square root, when the value really is one. */
+export function snapNice(value: number): number {
+  if (!Number.isFinite(value) || Math.abs(value) < 1e-8) return 0;
+  for (let den = 1; den <= 24; den += 1) {
+    const num = Math.round(value * den);
+    if (Math.abs(value - num / den) <= 5e-6 * Math.max(1, Math.abs(value))) return num / den;
+  }
+  const square = value * value;
+  for (let den = 1; den <= 12; den += 1) {
+    const num = Math.round(square * den);
+    if (num > 0 && Math.abs(square - num / den) <= 5e-6 * Math.max(1, square)) {
+      const magnitude = Math.sqrt(num / den);
+      return value < 0 ? -magnitude : magnitude;
+    }
+  }
+  return value;
+}
+
+export function mathLiteral(value: number): string {
+  const snapped = snapNice(value);
+  if (Math.abs(snapped) < 1e-12) return '0';
+  for (let den = 1; den <= 24; den += 1) {
+    const num = Math.round(snapped * den);
+    if (Math.abs(snapped - num / den) <= 1e-8) {
+      const body = den === 1 ? String(num) : `${num}/${den}`;
+      return body.startsWith('-') || den !== 1 ? `(${body})` : body;
+    }
+  }
+  const text = Number(snapped.toPrecision(12)).toString();
+  return text.startsWith('-') ? `(${text})` : text;
+}
+
 export function latexNumber(value: number): string {
   if (Math.abs(value) < 1e-10) return '0';
   const rational = rationalize(value, 12);

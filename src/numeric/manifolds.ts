@@ -6,7 +6,7 @@
 
 import { derivative, parse, type MathNode } from 'mathjs';
 import type { CompiledSystem, EquilibriumAnalysis, ManifoldBranch, SystemSpec, ViewportBounds } from '../core/types';
-import { latexNumber, seriesMonomialLatex, substituteExpr, substituteNumbers } from './algebra';
+import { latexNumber, mathLiteral, seriesMonomialLatex, snapNice, substituteExpr, substituteNumbers } from './algebra';
 import { symbolToLatex } from '../input/parser';
 import { invert2 } from './linearAlgebra';
 import { integrateRK45 } from './rk45';
@@ -139,10 +139,10 @@ function manifoldSeries(
       break;
     }
   }
-  const printedDegree = reducedSeries.reduce((last, value, index) => (Math.abs(value) > 1e-8 ? index : last), 0);
-  const reducedLatex = reduced
-    ? `\\dot{u} = ${seriesMonomialLatex(reducedSeries, 'u')}${higherRemainder(reducedSeries, printedDegree)}`
-    : undefined;
+  const cleanedReduced = displaySeries(reducedSeries);
+  const topDegree = cleanedReduced.reduce((last, value, index) => (Math.abs(value) > 1e-10 ? index : last), 0);
+  const remainder = topDegree >= SERIES_DEGREE ? ` + O(u^{${SERIES_DEGREE + 1}})` : '';
+  const reducedLatex = reduced ? `\\dot{u} = ${seriesMonomialLatex(cleanedReduced, 'u')}${remainder}` : undefined;
   return { taylorLatex, reducedLatex, reduced };
 }
 
@@ -214,57 +214,94 @@ function differentiateSeries(h: number[], max: number): number[] {
   return out;
 }
 
-function graphLatex(vars: string[], coords: number[], tangent: number[], transverse: number[], h: number[]): string {
+function graphLatex(vars: string[], coords: number[], tangent: number[], transverse: number[], raw: number[]): string {
+  const h = displaySeries(raw);
+  const max = h.length - 1;
   const xLatex = symbolToLatex(vars[0] ?? 'x');
   const yLatex = symbolToLatex(vars[1] ?? 'y');
-  const axis = axisAligned(tangent, transverse);
-  const polynomial = seriesMonomialLatex(h, 'u');
-  if (axis === 'horizontal') {
-    const along = Math.abs(coords[0] ?? 0) < 1e-5 ? xLatex : `(${xLatex}-${latexNumber(coords[0] ?? 0)})`;
-    const shifted = retargetSeries(polynomial, along);
-    const scale = transverse[1] ?? 1;
-    const expression = Math.abs(scale - 1) < 1e-8 ? shifted : scaleExpression(shifted, scale);
-    if (Math.abs(coords[1] ?? 0) < 1e-5) return `${yLatex} = ${expression}`;
-    return `${yLatex} = ${latexNumber(coords[1] ?? 0)}+${expression}`;
+  const overX = Math.abs(tangent[0] ?? 0) >= Math.abs(tangent[1] ?? 0);
+  const along = overX ? (tangent[0] ?? 0) : (tangent[1] ?? 0);
+  const alongNormal = overX ? (transverse[0] ?? 0) : (transverse[1] ?? 0);
+  const cross = overX ? (tangent[1] ?? 0) : (tangent[0] ?? 0);
+  const crossNormal = overX ? (transverse[1] ?? 0) : (transverse[0] ?? 0);
+  const parameter = addSeries(linearSeries(along, max + 1), scaleSeries(h, alongNormal));
+  const inverse = revertSeries(parameter, max);
+  const output = addSeries(linearSeries(cross, max + 1), scaleSeries(h, crossNormal));
+  const composed = inverse ? displaySeries(composeSeries(output, inverse, max)) : null;
+  if (!composed) return `v = ${seriesMonomialLatex(h, 'u')}`;
+  const shift = (symbol: string, origin: number) => (Math.abs(origin) < 1e-6 ? symbol : `\\left(${symbol}-${latexNumber(origin)}\\right)`);
+  const independent = overX ? shift(xLatex, coords[0] ?? 0) : shift(yLatex, coords[1] ?? 0);
+  const dependent = overX ? yLatex : xLatex;
+  const constant = overX ? (coords[1] ?? 0) : (coords[0] ?? 0);
+  return `${dependent} = ${withConstant(constant, seriesMonomialLatex(composed, independent))}`;
+}
+
+function displaySeries(series: number[]): number[] {
+  const peak = Math.max(...series.map((value) => Math.abs(value)), 0);
+  return series.map((value, index) => {
+    if (index > 0 && peak > 0 && Math.abs(value) < Math.max(1e-6, peak * 1e-5)) return 0;
+    return snapNice(value);
+  });
+}
+
+function linearSeries(slope: number, length: number): number[] {
+  const series = Array(length).fill(0) as number[];
+  if (length > 1) series[1] = slope;
+  return series;
+}
+
+function scaleSeries(series: number[], factor: number): number[] {
+  return series.map((value) => value * factor);
+}
+
+function addSeries(left: number[], right: number[]): number[] {
+  const length = Math.max(left.length, right.length);
+  return Array.from({ length }, (_, index) => (left[index] ?? 0) + (right[index] ?? 0));
+}
+
+function composeSeries(outer: number[], inner: number[], max: number): number[] {
+  const acc = Array(max + 1).fill(0) as number[];
+  acc[0] = outer[0] ?? 0;
+  let power = [1];
+  for (let degree = 1; degree <= max; degree += 1) {
+    power = multiplySeries(power, inner, max);
+    const coeff = outer[degree] ?? 0;
+    if (Math.abs(coeff) < 1e-15) continue;
+    for (let index = 0; index <= max; index += 1) acc[index] += coeff * (power[index] ?? 0);
   }
-  if (axis === 'vertical') {
-    if (polynomial === '0') return `${xLatex} = ${latexNumber(coords[0] ?? 0)}`;
-    const along = Math.abs(coords[1] ?? 0) < 1e-5 ? yLatex : `(${yLatex}-${latexNumber(coords[1] ?? 0)})`;
-    const shifted = retargetSeries(polynomial, along);
-    const scale = transverse[0] ?? 1;
-    const expression = Math.abs(scale - 1) < 1e-8 ? shifted : scaleExpression(shifted, scale);
-    return `${xLatex} = ${expression}`;
+  return acc;
+}
+
+function revertSeries(series: number[], max: number): number[] | null {
+  const lead = series[1] ?? 0;
+  if (Math.abs(lead) < 1e-8) return null;
+  const inverse = Array(max + 1).fill(0) as number[];
+  inverse[1] = 1 / lead;
+  for (let degree = 2; degree <= max; degree += 1) {
+    let extra = 0;
+    let power = [1];
+    for (let factor = 1; factor <= degree; factor += 1) {
+      power = multiplySeries(power, inverse, degree);
+      if (factor === 1) continue;
+      extra += (series[factor] ?? 0) * (power[degree] ?? 0);
+    }
+    inverse[degree] = -extra / lead;
   }
-  return `v = ${polynomial}`;
+  return inverse;
 }
 
-function retargetSeries(polynomial: string, along: string): string {
-  return polynomial.replace(/u\^\{(\d+)\}/g, `${along}^{$1}`).replace(/u/g, along);
-}
-
-function scaleExpression(expression: string, scale: number): string {
-  if (expression === '0') return '0';
-  return `${latexNumber(scale)}\\left(${expression}\\right)`;
-}
-
-function axisAligned(tangent: number[], transverse: number[]): 'horizontal' | 'vertical' | 'tilted' {
-  const t = [tangent[0] ?? 0, tangent[1] ?? 0];
-  const n = [transverse[0] ?? 0, transverse[1] ?? 0];
-  if (Math.abs(t[0]!) > 0.98 && Math.abs(t[1]!) < 0.05 && Math.abs(n[1]!) > 0.98 && Math.abs(n[0]!) < 0.05) return 'horizontal';
-  if (Math.abs(t[1]!) > 0.98 && Math.abs(t[0]!) < 0.05 && Math.abs(n[0]!) > 0.98 && Math.abs(n[1]!) < 0.05) return 'vertical';
-  return 'tilted';
+function withConstant(constant: number, polynomial: string): string {
+  const snapped = snapNice(constant);
+  if (Math.abs(snapped) < 1e-8) return polynomial;
+  const head = latexNumber(snapped);
+  if (polynomial === '0') return head;
+  return polynomial.startsWith('-') ? `${head}${polynomial}` : `${head}+${polynomial}`;
 }
 
 function reducedMonomial(coeff: number, degree: number): string {
   const coeffs = Array(Math.max(degree, 0) + 1).fill(0) as number[];
   if (degree >= 1) coeffs[degree] = coeff;
   return seriesMonomialLatex(coeffs, 'u');
-}
-
-function higherRemainder(series: number[], leading: number): string {
-  const next = series.findIndex((value, index) => index > leading && Math.abs(value) > 1e-8);
-  if (next < 0) return '';
-  return ` + O(u^{${next}})`;
 }
 
 function applyCenterStability(eq: EquilibriumAnalysis, reduced: { degree: number; coeff: number }, transverseReal: number): void {
@@ -352,7 +389,5 @@ function factorial(n: number): number {
 }
 
 function formatOffset(value: number): string {
-  if (Math.abs(value) < 1e-12) return '0';
-  const text = Number(value.toPrecision(12)).toString();
-  return text.startsWith('-') ? `(${text})` : text;
+  return mathLiteral(value);
 }
