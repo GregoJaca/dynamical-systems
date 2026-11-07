@@ -21,7 +21,7 @@ function equilibriumBlock(eq: EquilibriumAnalysis): string {
       : '',
     eq.poincareIndex2D !== undefined ? `Poincaré index \\(${eq.poincareIndex2D}\\).` : '',
     `Classification: ${prettyLabel(eq.classification2D ?? eq.classification3D)}. Stability: ${prettyLabel(eq.stability)}.`,
-    eq.stabilityReasonLatex ? `\\[${eq.stabilityReasonLatex}\\]` : '',
+    eq.stabilityReasonLatex ?? '',
     ...eq.subspaces.map((space) => `\\[${space.cartesianFormulaLatex}\\]`),
   ];
   return lines.filter(Boolean).join('\n');
@@ -55,10 +55,12 @@ export function workedSections(spec: SystemSpec, analysis: NumericAnalysis): Sol
   }
   const globalBits = [
     analysis.global.divergenceLatex ? `\\[\\nabla\\cdot f = ${analysis.global.divergenceLatex}\\]` : '',
-    analysis.global.hamiltonianLatex ? `\\[H = ${analysis.global.hamiltonianLatex}\\]` : '',
+    analysis.global.hamiltonianLatex
+      ? `\\[${analysis.global.hamiltonianLatex.trim().startsWith('H') ? analysis.global.hamiltonianLatex : `H = ${analysis.global.hamiltonianLatex}`}\\]`
+      : '',
     analysis.global.potentialFunctionLatex ? `\\[V = ${analysis.global.potentialFunctionLatex}\\]` : '',
     analysis.global.lyapunov
-      ? `\\[V = ${analysis.global.lyapunov.vLatex},\\quad \\dot V = ${analysis.global.lyapunov.vDotLatex}\\]\n\\[${analysis.global.lyapunov.conclusionLatex}\\]`
+      ? `\\[V = ${analysis.global.lyapunov.vLatex},\\quad \\dot V = ${analysis.global.lyapunov.vDotLatex}\\]\n${analysis.global.lyapunov.conclusionLatex}`
       : '',
     analysis.global.bendixsonDulac?.applies
       ? `\\[B = ${analysis.global.bendixsonDulac.multiplierLatex},\\quad \\nabla\\cdot(Bf) = ${analysis.global.bendixsonDulac.divergenceProductLatex}\\]\n${analysis.global.bendixsonDulac.conclusion}`

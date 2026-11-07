@@ -3,7 +3,7 @@ import type { LayerVisibility, NumericAnalysis } from './types';
 export function defaultLayers(): LayerVisibility {
   return {
     streamlines: true,
-    particles: true,
+    particles: false,
     manifoldsWuWs: false,
     centerManifoldWc: false,
     linearSubspaces: false,
@@ -12,7 +12,7 @@ export function defaultLayers(): LayerVisibility {
     lyapunov: false,
     hamiltonianContours: false,
     polarSplit: false,
-    traceDetMinimap: true,
+    traceDetMinimap: false,
     equilibria: true,
     separatrices: true,
     limitCycles: true,

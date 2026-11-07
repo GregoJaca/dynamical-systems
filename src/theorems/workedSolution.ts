@@ -94,7 +94,7 @@ export function buildWorkedSolutionLatex(analysis: NumericAnalysis, spec?: Worke
   ];
   if (analysis.global.curl2DLatex) globalLines.push(`Planar curl: $${analysis.global.curl2DLatex}$.`);
   if (analysis.global.isHamiltonian && analysis.global.hamiltonianLatex) {
-    globalLines.push(`Hamiltonian: $H = ${analysis.global.hamiltonianLatex}$, with $\\dot x = H_y$ and $\\dot y = -H_x$.`);
+    globalLines.push(`Hamiltonian: $${analysis.global.hamiltonianLatex.trim().startsWith('H') ? analysis.global.hamiltonianLatex : `H = ${analysis.global.hamiltonianLatex}`}$, with $\\dot x = H_y$ and $\\dot y = -H_x$.`);
   }
   if (analysis.global.isGradientSystem && analysis.global.potentialFunctionLatex) {
     globalLines.push(`Gradient structure: $f = -\\nabla V$ with $V = ${analysis.global.potentialFunctionLatex}$.`);

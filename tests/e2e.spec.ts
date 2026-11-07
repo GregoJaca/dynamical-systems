@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('numeric portrait appears and nothing is written to localStorage', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Study this system' }).click();
   const canvas = page.locator('canvas').first();
   await expect(canvas).toBeVisible();
   await page.waitForTimeout(250);
@@ -31,6 +32,7 @@ test('a shared hash restores the parameter and stays stateless', async ({ page, 
   const fresh = await browser.newContext();
   const restored = await fresh.newPage();
   await restored.goto(`/${hash}`);
+  await restored.getByRole('button', { name: 'Portrait' }).click();
   await expect(restored.locator('canvas').first()).toBeVisible();
   expect(await restored.evaluate(() => window.location.hash)).toBe(hash);
   expect(await restored.evaluate(() => window.localStorage.length)).toBe(0);

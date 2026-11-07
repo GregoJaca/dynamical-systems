@@ -27,13 +27,12 @@ export function ExampleGallery() {
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass scroll-thin max-h-full w-full max-w-5xl overflow-auto rounded-3xl p-5"
+        className="sheet scroll-thin max-h-full w-full max-w-5xl overflow-auto rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-5"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.18em] opacity-60">Perko corpus</p>
-            <h2 className="font-display text-2xl">24 canonical portraits</h2>
+            <h2 className="font-display text-2xl">Examples</h2>
           </div>
           <div className="flex gap-2">
             <input

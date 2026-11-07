@@ -60,6 +60,18 @@ describe('parser', () => {
     expect(forced.isAutonomous).toBe(false);
   });
 
+  it('accepts ** as a power', () => {
+    const spec = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['x**2', '-y + x**2'],
+    });
+    const compiled = compileSystemNumeric(spec);
+    expect(compiled.f(0, [2, 1], {})[0]).toBeCloseTo(4, 8);
+    expect(compiled.f(0, [2, 1], {})[1]).toBeCloseTo(3, 8);
+  });
+
   it('strips a written left-hand side', () => {
     const spec = parseSystem({
       mode: 'autonomous',

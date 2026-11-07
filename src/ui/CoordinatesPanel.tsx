@@ -2,11 +2,10 @@ import { useSystemStore } from '../store/useSystemStore';
 import { Badge, Section } from './bits';
 import { prettyLabel } from './format';
 import { Katex } from './Katex';
+import { RichText } from './RichText';
 
 export function CoordinatesPanel() {
   const analysis = useSystemStore((state) => state.analysis);
-  const polarSplit = useSystemStore((state) => state.layers.polarSplit);
-  const toggleLayer = useSystemStore((state) => state.toggleLayer);
   const polar = analysis.coordinateTransforms.polar2D;
   const cylindrical = analysis.coordinateTransforms.cylindrical3D;
   const spherical = analysis.coordinateTransforms.spherical3D;
@@ -26,11 +25,8 @@ export function CoordinatesPanel() {
             {polar.radialEquilibriaR.length > 0 && <p className="text-sm">Radial equilibria r = {polar.radialEquilibriaR.map((radius) => radius.toPrecision(4)).join(', ')}</p>}
           </div>
         ) : (
-          <p className="text-sm opacity-70">Polar reduction appears for planar systems.</p>
+          <p className="text-sm opacity-70">Polar formulas appear here for planar systems. The picture is on the portrait, below the phase plane.</p>
         )}
-        <button type="button" className="rounded-full bg-[#f0b429]/20 px-3 py-1 text-xs text-[#f0b429]" onClick={() => toggleLayer('polarSplit')}>
-          {polarSplit ? 'Close split (r, θ) portrait' : 'Open split (r, θ) phase portrait'}
-        </button>
       </Section>
       <Section title="Cylindrical and spherical">
         {cylindrical ? (
@@ -56,7 +52,9 @@ export function CoordinatesPanel() {
       <Section title="Divergence, symmetries, and integrals">
         {global.divergenceLatex && <Katex tex={`\\nabla\\cdot f = ${global.divergenceLatex}`} display />}
         {global.isGradientSystem && global.potentialFunctionLatex && <Katex tex={`f = -\\nabla V,\\quad V = ${global.potentialFunctionLatex}`} display />}
-        {global.isHamiltonian && global.hamiltonianLatex && <Katex tex={`H = ${global.hamiltonianLatex}`} display />}
+        {global.isHamiltonian && global.hamiltonianLatex && (
+          <Katex tex={global.hamiltonianLatex.trim().startsWith('H') ? global.hamiltonianLatex : `H = ${global.hamiltonianLatex}`} display />
+        )}
         {global.symmetries.map((symmetry) => (
           <div key={symmetry.type} className="rounded-xl bg-black/10 p-2 text-sm">
             <Badge>{prettyLabel(symmetry.type)}</Badge>
@@ -77,7 +75,7 @@ export function CoordinatesPanel() {
             <Badge tone={global.lyapunov.classification === 'strict_lyapunov' ? 'good' : 'gold'}>{prettyLabel(global.lyapunov.classification)}</Badge>
             <Katex tex={`V = ${global.lyapunov.vLatex}`} display />
             <Katex tex={`\\dot V = ${global.lyapunov.vDotLatex}`} display />
-            <Katex tex={global.lyapunov.conclusionLatex} display />
+            <RichText text={global.lyapunov.conclusionLatex} />
           </div>
         )}
       </Section>

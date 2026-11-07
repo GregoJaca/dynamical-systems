@@ -122,6 +122,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
   const particlesRef = useRef<SimParticle[]>([]);
   const propsRef = useRef(props);
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
+  const paintKick = useRef<() => void>(() => {});
   propsRef.current = props;
   const radius = suggestedRadius(props);
   const [bounds, setBounds] = useState<PolarBounds>({ rMin: 0, rMax: radius, thMin: -Math.PI, thMax: Math.PI });
@@ -204,6 +205,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
         canvas.height = bufferH;
       }
       setSize((previous) => (previous.w === w && previous.h === h ? previous : { w, h }));
+      paintKick.current();
     };
     const observer = new ResizeObserver(resize);
     observer.observe(wrap);
@@ -259,14 +261,28 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
         ctx.fillText('θ', liveView.left + 8, liveView.top + 14);
         ctx.restore();
       }
-      raf = requestAnimationFrame(frame);
+      if (propsRef.current.particles.playing) requestFrame();
     };
-    raf = requestAnimationFrame(frame);
+    let scheduled = false;
+    const requestFrame = () => {
+      if (scheduled) return;
+      scheduled = true;
+      raf = requestAnimationFrame((now) => {
+        scheduled = false;
+        frame(now);
+      });
+    };
+    paintKick.current = requestFrame;
+    requestFrame();
     return () => {
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    paintKick.current();
+  });
 
   const viewRef = useRef<ViewRect>(view);
   const curvesRef = useRef(curves.pieces);

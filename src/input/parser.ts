@@ -286,6 +286,7 @@ function normalizeMath(raw: string): string {
   let text = raw.trim();
   if (!text) return '';
   text = text.replace(/[−–]/g, '-').replace(/π/g, 'pi').replace(/θ/g, 'theta').replace(/ω/g, 'omega').replace(/μ/g, 'mu');
+  text = text.replace(/\*\*/g, '^').replace(/²/g, '^2').replace(/³/g, '^3');
   const latexNames = Object.keys(LATEX_SYMBOLS).sort((a, b) => b.length - a.length);
   for (const latex of latexNames) {
     text = text.replace(new RegExp(escapeRegExp(latex), 'g'), LATEX_SYMBOLS[latex] ?? latex);

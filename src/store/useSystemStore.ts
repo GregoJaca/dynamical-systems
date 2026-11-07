@@ -55,10 +55,14 @@ export interface SystemStore extends SnapshotSource {
   userOrbits: StreamlineSegment[];
   galleryOpen: boolean;
   extendedPhase: boolean;
+  draftVars: string[];
+  view: 'system' | 'portrait' | 'notes';
   boot: () => void;
   loadSnapshot: (snapshot: ShareSnapshot) => void;
   loadExample: (example: PerkoExample) => void;
   setDraftRow: (index: number, value: string) => void;
+  setSystem: (vars: string[], rows: string[]) => void;
+  setView: (view: 'system' | 'portrait' | 'notes') => void;
   setMode: (mode: SystemMode) => void;
   setDimension: (dimension: number) => void;
   setParameterValue: (name: string, value: number) => void;
@@ -226,12 +230,19 @@ function specFromExample(example: PerkoExample, revision: number): { spec: Syste
   }
 }
 
-function createInitial(): { spec: SystemSpec; draftRows: string[]; exampleId: string; parseError: string | null } {
+function editorVarsFor(mode: SystemMode, stateVars: string[], rowCount: number): string[] {
+  if (mode === 'second_order_scalar') return [stateVars[0] ?? 'x'];
+  if (stateVars.length === rowCount) return [...stateVars];
+  return defaultVars(rowCount);
+}
+
+function createInitial(): { spec: SystemSpec; draftRows: string[]; draftVars: string[]; exampleId: string; parseError: string | null } {
   const example = defaultExample();
   const built = specFromExample(example, nextRevision());
   return {
     spec: built.spec,
     draftRows: [...example.rows],
+    draftVars: editorVarsFor(example.mode, example.stateVars, example.rows.length),
     exampleId: example.id,
     parseError: built.error,
   };
@@ -252,7 +263,7 @@ const initialFlow: FlowMapState = {
   playing: false,
 };
 
-const initialParticles: ParticleSettings = { playing: true, mode: 'trueVelocity', count: 250 };
+const initialParticles: ParticleSettings = { playing: false, mode: 'uniformSpeed', count: 36 };
 
 export const useSystemStore = create<SystemStore>((set, get) => {
   const applyCas = (enrichment: CasEnrichment) => {
@@ -387,6 +398,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
     stateVars: string[];
     rows: string[];
     userLyapunovExpr?: string;
+    editorVars?: string[];
     exampleId: string | null;
     plan: PublishOptions;
     cas: 'debounce' | 'now';
@@ -405,9 +417,11 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       userLyapunovExpr: input.userLyapunovExpr,
     };
     const parsed = tryParseSystem(request);
+    const editorVars = input.editorVars ?? editorVarsFor(input.mode, input.stateVars, input.rows.length);
     if (!parsed.ok) {
       set({
         draftRows: [...input.rows],
+        draftVars: editorVars,
         exampleId: input.exampleId,
         parseError: parsed.error,
       });
@@ -424,6 +438,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       set({
         spec,
         draftRows: [...input.rows],
+        draftVars: editorVars,
         exampleId: input.exampleId,
         compiled: compileSafe(spec),
         parseError: null,
@@ -437,6 +452,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
     } catch (error) {
       set({
         draftRows: [...input.rows],
+        draftVars: editorVars,
         exampleId: input.exampleId,
         parseError: error instanceof Error ? error.message : 'Could not parse the system',
       });
@@ -489,6 +505,8 @@ export const useSystemStore = create<SystemStore>((set, get) => {
     set({
       spec,
       draftRows: [...snapshot.rows],
+      draftVars: editorVarsFor(snapshot.mode, snapshot.stateVars, snapshot.rows.length),
+      view: 'portrait',
       exampleId: snapshot.exampleId ?? null,
       compiled: compileSafe(spec),
       parseError,
@@ -523,6 +541,8 @@ export const useSystemStore = create<SystemStore>((set, get) => {
   return {
     spec: initial.spec,
     draftRows: initial.draftRows,
+    draftVars: initial.draftVars,
+    view: 'system',
     exampleId: initial.exampleId,
     parseError: initial.parseError,
     analysis: emptyAnalysis(initial.spec.revision, initialViewport),
@@ -531,7 +551,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
     autoViewport: initialViewport,
     viewportLocked: false,
     layers: defaultLayers(),
-    theme: 'dark',
+    theme: 'light',
     particles: initialParticles,
     inspectorTab: 'objects',
     selectedEquilibriumId: null,
@@ -598,6 +618,8 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       set({
         spec,
         draftRows: [...example.rows],
+        draftVars: editorVarsFor(example.mode, example.stateVars, example.rows.length),
+        view: 'portrait',
         exampleId: example.id,
         compiled: compileSafe(spec),
         parseError,
@@ -626,12 +648,43 @@ export const useSystemStore = create<SystemStore>((set, get) => {
         dimension: spec.dimension,
         stateVars: [...spec.stateVars],
         rows,
+        editorVars: get().draftVars,
         userLyapunovExpr: spec.userLyapunovExpr,
         exampleId: null,
         plan: { reframe: true, freezeViewport: false, layers: 'merge' },
         cas: 'debounce',
       });
     },
+
+    setSystem: (vars, rows) => {
+      if (vars.length === 0 || vars.length !== rows.length) return;
+      const names = vars.map((name) => name.trim());
+      const equations = rows.map((row) => row);
+      if (names.some((name) => name.length === 0) || equations.some((row) => row.trim().length === 0)) {
+        set({
+          draftRows: equations,
+          draftVars: names,
+          parseError: names.some((name) => name.length === 0) ? 'Name each variable.' : 'An equation is empty.',
+        });
+        return;
+      }
+      const spec = get().spec;
+      const secondOrder = equations.length === 1 && /''|′′/.test(equations[0] ?? '');
+      const velocity = spec.mode === 'second_order_scalar' ? (spec.stateVars[1] ?? 'v') : 'v';
+      reparse({
+        mode: secondOrder ? 'second_order_scalar' : 'autonomous',
+        dimension: secondOrder ? 2 : equations.length,
+        stateVars: secondOrder ? [names[0] ?? 'x', velocity] : names,
+        rows: equations.map((row) => row.trim()),
+        editorVars: names,
+        userLyapunovExpr: spec.userLyapunovExpr,
+        exampleId: null,
+        plan: { reframe: true, freezeViewport: false, layers: 'merge' },
+        cas: 'debounce',
+      });
+    },
+
+    setView: (view) => set({ view }),
 
     setMode: (mode) => {
       const spec = get().spec;

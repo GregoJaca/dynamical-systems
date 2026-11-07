@@ -107,7 +107,7 @@ class SceneErrorBoundary extends Component<BoundaryProps, BoundaryState> {
  * not rendered: time stays a parameter and this view shows the spatial state only.
  */
 export function PhaseScene3D(props: PhaseScene3DProps) {
-  const { spec, analysis, theme, hoverObjectId, selectedObjectId } = props;
+  const { analysis, theme, hoverObjectId, selectedObjectId } = props;
   const palette = PALETTE[theme];
   const [preset, setPreset] = useState<CameraPreset>('isometric');
   const [traceArmed, setTraceArmed] = useState(false);
@@ -142,10 +142,6 @@ export function PhaseScene3D(props: PhaseScene3DProps) {
           </button>
         </div>
         <div style={{ ...noteStyle, color: palette.muted }}>
-          <span>
-            {spec.isAutonomous ? 'Autonomous' : 'Non-autonomous'} · {spec.dimension}D
-            {spec.stateVars.length > 0 ? ` · ${spec.stateVars.slice(0, 3).join(', ')}` : ''}
-          </span>
           <span>{traceArmed ? 'Click inside the box to place x(0).' : 'Drag to orbit. Click an object to select it.'}</span>
           {caption ? (
             <span style={{ color: palette.text, maxWidth: 720, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

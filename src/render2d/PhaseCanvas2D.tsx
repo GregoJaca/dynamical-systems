@@ -125,6 +125,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
   const particlesRef = useRef<SimParticle[]>([]);
   const particleKeyRef = useRef('');
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
+  const paintKick = useRef<() => void>(() => {});
   const cacheRef = useRef<FieldCache>({
     basinStamp: '',
     basin: null,
@@ -242,6 +243,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
         canvas.height = bufferH;
       }
       setSize((previous) => (previous.w === w && previous.h === h ? previous : { w, h }));
+      paintKick.current();
     };
     const observer = new ResizeObserver(resize);
     observer.observe(wrap);
@@ -294,9 +296,21 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
           droplet: current.flowMap.active && deformed.length > 0 ? { ghost, deformed } : null,
         });
       }
-      raf = requestAnimationFrame(frame);
+      const live = propsRef.current;
+      const moving = (live.particles.playing && live.layers.particles) || (live.flowMap.active && live.flowMap.playing);
+      if (moving) requestFrame();
     };
-    raf = requestAnimationFrame(frame);
+    let scheduled = false;
+    const requestFrame = () => {
+      if (scheduled) return;
+      scheduled = true;
+      raf = requestAnimationFrame((now) => {
+        scheduled = false;
+        frame(now);
+      });
+    };
+    paintKick.current = requestFrame;
+    requestFrame();
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const current = propsRef.current;
@@ -321,6 +335,10 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
       wrap.removeEventListener('wheel', onWheel);
     };
   }, []);
+
+  useEffect(() => {
+    paintKick.current();
+  });
 
   useEffect(() => {
     if (!props.flowMap.active || !props.flowMap.playing) return;

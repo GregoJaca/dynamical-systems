@@ -1,34 +1,25 @@
-import { useEffect, useState } from 'react';
-import { BookOpen } from 'lucide-react';
-import type { ParameterSpec, SystemMode } from '../core/types';
-import { exampleById } from '../examples/perkoExamples';
+import { useEffect, useRef, useState } from 'react';
+import type { ParameterSpec } from '../core/types';
 import { useSystemStore } from '../store/useSystemStore';
-import { rowPreviewLatex } from './asciiLatex';
-import { Badge } from './bits';
 import { parseUserNumber, rationalLabel } from './format';
 import { Katex } from './Katex';
 
-const MODES: Array<{ id: SystemMode; label: string }> = [
-  { id: 'autonomous', label: 'Autonomous' },
-  { id: 'second_order_scalar', label: '2nd-order' },
-  { id: 'non_autonomous', label: 'Non-autonomous' },
-];
+const NAME_SEQUENCE = ['x', 'y', 'z', 'w', 'u', 'v', 'p', 'q'];
 
-const DIMENSIONS = [1, 2, 3, 4] as const;
+function nextName(used: string[]): string {
+  const free = NAME_SEQUENCE.find((name) => !used.includes(name));
+  if (free) return free;
+  let index = used.length + 1;
+  while (used.includes(`x${index}`)) index += 1;
+  return `x${index}`;
+}
 
 function ParameterControl({ spec }: { spec: ParameterSpec }) {
   const setParameterValue = useSystemStore((state) => state.setParameterValue);
-  const setParameterBounds = useSystemStore((state) => state.setParameterBounds);
   const flushCas = useSystemStore((state) => state.flushCas);
   const [text, setText] = useState(rationalLabel(spec.value));
-  const [minText, setMinText] = useState(String(spec.min));
-  const [maxText, setMaxText] = useState(String(spec.max));
-  const [stepText, setStepText] = useState(String(spec.step));
 
   useEffect(() => setText(rationalLabel(spec.value)), [spec.value]);
-  useEffect(() => setMinText(String(spec.min)), [spec.min]);
-  useEffect(() => setMaxText(String(spec.max)), [spec.max]);
-  useEffect(() => setStepText(String(spec.step)), [spec.step]);
 
   const commitText = () => {
     const value = parseUserNumber(text);
@@ -40,32 +31,11 @@ function ParameterControl({ spec }: { spec: ParameterSpec }) {
     flushCas();
   };
 
-  const commitBounds = () => {
-    const min = Number(minText);
-    const max = Number(maxText);
-    const step = Number(stepText);
-    if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step)) return;
-    setParameterBounds(spec.name, { min, max, step });
-  };
-
   return (
-    <div className="rounded-2xl border border-slate-400/25 px-3 py-2">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <Katex tex={spec.latex} />
-        <input
-          aria-label={`${spec.name} value`}
-          className="w-24 rounded-lg bg-black/10 px-2 py-1 text-right text-sm"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onBlur={commitText}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') commitText();
-          }}
-        />
-      </div>
+    <label className="parameter">
+      <Katex tex={spec.latex} />
       <input
         aria-label={`${spec.name} slider`}
-        className="w-full accent-[#f0b429]"
         type="range"
         min={spec.min}
         max={spec.max}
@@ -75,153 +45,180 @@ function ParameterControl({ spec }: { spec: ParameterSpec }) {
         onPointerUp={flushCas}
         onKeyUp={flushCas}
       />
-      <div className="mt-1 grid grid-cols-3 gap-1 text-[11px] opacity-75">
-        {(['min', 'max', 'step'] as const).map((field) => (
-          <label key={field} className="flex flex-col">
-            {field}
-            <input
-              className="rounded bg-black/10 px-1 py-0.5 text-inherit"
-              value={field === 'min' ? minText : field === 'max' ? maxText : stepText}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (field === 'min') setMinText(next);
-                else if (field === 'max') setMaxText(next);
-                else setStepText(next);
-              }}
-              onBlur={commitBounds}
-            />
-          </label>
-        ))}
-      </div>
-    </div>
+      <input
+        aria-label={`${spec.name} value`}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commitText}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commitText();
+        }}
+      />
+    </label>
   );
 }
 
-export function EquationPanel({ onClose }: { onClose: () => void }) {
+export function EquationPanel() {
   const spec = useSystemStore((state) => state.spec);
   const draftRows = useSystemStore((state) => state.draftRows);
-  const exampleId = useSystemStore((state) => state.exampleId);
+  const draftVars = useSystemStore((state) => state.draftVars);
   const parseError = useSystemStore((state) => state.parseError);
   const numericStatus = useSystemStore((state) => state.numericStatus);
-  const casStatus = useSystemStore((state) => state.casStatus);
-  const setDraftRow = useSystemStore((state) => state.setDraftRow);
-  const setMode = useSystemStore((state) => state.setMode);
-  const setDimension = useSystemStore((state) => state.setDimension);
+  const setSystem = useSystemStore((state) => state.setSystem);
   const setUserLyapunov = useSystemStore((state) => state.setUserLyapunov);
   const openGallery = useSystemStore((state) => state.openGallery);
-  const example = exampleById(exampleId);
+  const setView = useSystemStore((state) => state.setView);
+  const [pending, setPending] = useState('');
+  const [lyapunov, setLyapunov] = useState(spec.userLyapunovExpr ?? '');
+  const pendingRef = useRef<HTMLInputElement>(null);
+  const rowRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const focusLast = useRef(false);
+
+  useEffect(() => setLyapunov(spec.userLyapunovExpr ?? ''), [spec.userLyapunovExpr]);
+  useEffect(() => {
+    if (!focusLast.current) return;
+    focusLast.current = false;
+    rowRefs.current[draftRows.length - 1]?.focus();
+  }, [draftRows.length]);
+
+  const commit = (vars: string[], rows: string[]) => {
+    setSystem(vars, rows);
+  };
+
+  const addFromPending = (value: string) => {
+    const name = nextName(draftVars);
+    focusLast.current = true;
+    setPending('');
+    commit([...draftVars, name], [...draftRows, value]);
+  };
+
   const parameters = Object.values(spec.parameters);
-  const secondOrder = spec.mode === 'second_order_scalar';
+  const status = parseError ? parseError : numericStatus === 'running' ? 'Computing the portrait…' : spec.isLinear ? 'Linear' : 'Nonlinear';
 
   return (
-    <aside className="glass flex h-full w-[340px] flex-col rounded-3xl">
-      <header className="flex items-start justify-between gap-2 px-4 pb-2 pt-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.18em] opacity-60">Equations</p>
-          <h1 className="font-display text-xl leading-tight">{example?.title ?? 'Custom system'}</h1>
+    <form
+      className="system-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!parseError) setView('portrait');
+      }}
+    >
+      <div className="system-brace">
+        <div className="brace" aria-hidden="true" />
+        <div className="equations">
+          {draftRows.map((row, index) => (
+            <div className="equation" key={`${draftVars[index] ?? 'row'}-${index}`}>
+              <input
+                aria-label={`Variable ${index + 1}`}
+                className="var-input"
+                value={draftVars[index] ?? ''}
+                spellCheck={false}
+                onChange={(event) => {
+                  const vars = [...draftVars];
+                  vars[index] = event.target.value;
+                  commit(vars, draftRows);
+                }}
+              />
+              <span className="prime">′ =</span>
+              <input
+                aria-label={`Right-hand side ${index + 1}`}
+                ref={(node) => {
+                  rowRefs.current[index] = node;
+                }}
+                className="eq-input"
+                value={row}
+                spellCheck={false}
+                placeholder="0"
+                onChange={(event) => {
+                  const rows = [...draftRows];
+                  rows[index] = event.target.value;
+                  if (!event.target.value.trim() && draftRows.length > 1) {
+                    commit(
+                      draftVars.filter((_, variableIndex) => variableIndex !== index),
+                      rows.filter((_, rowIndex) => rowIndex !== index),
+                    );
+                    return;
+                  }
+                  commit(draftVars, rows);
+                }}
+              />
+              {draftRows.length > 1 && (
+                <button
+                  type="button"
+                  className="text-button"
+                  aria-label={`Remove equation ${index + 1}`}
+                  onClick={() =>
+                    commit(
+                      draftVars.filter((_, variableIndex) => variableIndex !== index),
+                      draftRows.filter((_, rowIndex) => rowIndex !== index),
+                    )
+                  }
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="equation pending">
+            <span className="var-input ghost">{nextName(draftVars)}</span>
+            <span className="prime">′ =</span>
+            <input
+              ref={pendingRef}
+              aria-label="Add an equation"
+              className="eq-input"
+              value={pending}
+              spellCheck={false}
+              placeholder="add another equation"
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value.trim()) addFromPending(value);
+                else setPending(value);
+              }}
+            />
+          </div>
         </div>
-        <button type="button" className="rounded-full px-2 py-1 text-xs opacity-70" onClick={onClose} aria-label="Hide equations">
-          Hide
-        </button>
-      </header>
-      <div className="scroll-thin flex-1 space-y-3 overflow-auto px-4 pb-4">
-        <button type="button" className="flex w-full items-center justify-center gap-2 rounded-full bg-[#f0b429] px-3 py-2 text-sm font-semibold text-[#1c1404]" onClick={openGallery}>
-          <BookOpen size={16} />
-          Example gallery
-        </button>
-        <div className="grid grid-cols-3 gap-1">
-          {MODES.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              className={`rounded-full px-2 py-1 text-xs ${spec.mode === mode.id ? 'bg-[#f0b429]/20 text-[#f0b429]' : 'bg-black/10'}`}
-              onClick={() => setMode(mode.id)}
-            >
-              {mode.label}
-            </button>
+      </div>
+
+      {!parseError && spec.latexEquations.length > 0 && (
+        <div className="system-preview">
+          {spec.latexEquations.map((tex) => (
+            <Katex key={tex} tex={tex} display />
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {DIMENSIONS.map((dimension) => (
-            <button
-              key={dimension}
-              type="button"
-              disabled={secondOrder}
-              className={`rounded-full px-3 py-1 text-xs disabled:opacity-40 ${spec.dimension === dimension || (dimension === 4 && spec.dimension > 4) ? 'bg-[#f0b429]/20 text-[#f0b429]' : 'bg-black/10'}`}
-              onClick={() => setDimension(dimension)}
-            >
-              {dimension === 4 ? '4D+' : `${dimension}D`}
-            </button>
+      )}
+      <p className={parseError ? 'status error' : 'status'}>{status}</p>
+
+      {parameters.length > 0 && (
+        <div className="parameters">
+          {parameters.map((parameter) => (
+            <ParameterControl key={parameter.name} spec={parameter} />
           ))}
-          {spec.dimension >= 4 && !secondOrder && (
-            <span className="ml-1 flex items-center gap-1 text-xs">
-              <button type="button" className="rounded-full bg-black/10 px-2" onClick={() => setDimension(spec.dimension - 1)} disabled={spec.dimension <= 4}>
-                −
-              </button>
-              {spec.dimension}D
-              <button type="button" className="rounded-full bg-black/10 px-2" onClick={() => setDimension(spec.dimension + 1)} disabled={spec.dimension >= 8}>
-                +
-              </button>
-            </span>
-          )}
         </div>
-        <div className="flex flex-wrap gap-1">
-          <Badge tone={spec.isAutonomous ? 'good' : 'gold'}>{spec.isAutonomous ? 'Autonomous' : 'Explicit time'}</Badge>
-          <Badge>{spec.isLinear ? 'Linear' : 'Nonlinear'}</Badge>
-        </div>
-        <div className="space-y-2">
-          {draftRows.map((row, index) => {
-            const variable = spec.stateVars[index];
-            const parsed = !parseError && spec.latexEquations[index] && spec.latexEquations.length === draftRows.length;
-            const tex = parsed ? spec.latexEquations[index]! : rowPreviewLatex(row, variable, secondOrder && index === 0);
-            return (
-              <label key={`${spec.mode}-${index}`} className="block rounded-2xl border border-slate-400/25 p-2">
-                <span className="mb-1 block text-[11px] uppercase tracking-wide opacity-60">{variable ?? `Equation ${index + 1}`}</span>
-                <input
-                  aria-label={variable ? `${variable} equation` : `Equation ${index + 1}`}
-                  className="w-full rounded-xl bg-black/10 px-2 py-1.5 text-sm outline-none"
-                  value={row}
-                  spellCheck={false}
-                  onChange={(event) => setDraftRow(index, event.target.value)}
-                />
-                <div className="mt-1 min-h-6 text-sm">
-                  <Katex tex={tex} />
-                </div>
-              </label>
-            );
-          })}
-        </div>
-        {spec.latexEquations.length > 0 && spec.latexEquations.length !== draftRows.length && (
-          <div className="space-y-1 rounded-2xl bg-black/10 p-2">
-            <p className="text-[11px] uppercase tracking-wide opacity-60">Interpreted system</p>
-            {spec.latexEquations.map((tex) => (
-              <Katex key={tex} tex={tex} display />
-            ))}
-          </div>
-        )}
-        {parseError && <p className="rounded-xl bg-rose-500/15 px-3 py-2 text-sm text-rose-200">{parseError}</p>}
-        {parameters.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[11px] uppercase tracking-[0.16em] opacity-60">Parameters</p>
-            {parameters.map((specItem) => (
-              <ParameterControl key={specItem.name} spec={specItem} />
-            ))}
-          </div>
-        )}
-        <label className="block text-sm">
-          <span className="mb-1 block text-[11px] uppercase tracking-wide opacity-60">Lyapunov V(x)</span>
+      )}
+
+      <details className="optional">
+        <summary>Lyapunov function, if you have one</summary>
+        <label className="lyapunov">
+          V =
           <input
-            className="w-full rounded-xl bg-black/10 px-2 py-1.5 text-sm"
-            value={spec.userLyapunovExpr ?? ''}
-            placeholder="(x^2 + y^2) / 2"
-            onChange={(event) => setUserLyapunov(event.target.value)}
+            aria-label="Lyapunov function"
+            value={lyapunov}
+            spellCheck={false}
+            placeholder="(x^2 + y^2)/2"
+            onChange={(event) => setLyapunov(event.target.value)}
+            onBlur={() => setUserLyapunov(lyapunov)}
           />
         </label>
+      </details>
+
+      <div className="actions">
+        <button type="submit" disabled={Boolean(parseError)}>
+          Study this system
+        </button>
+        <button type="button" className="text-button" onClick={openGallery}>
+          Choose an example
+        </button>
       </div>
-      <footer className="flex items-center justify-between border-t border-slate-400/20 px-4 py-2 text-[11px] uppercase tracking-wide opacity-70">
-        <span>Numeric {numericStatus}</span>
-        <span>Symbolic {casStatus}</span>
-      </footer>
-    </aside>
+    </form>
   );
 }

@@ -107,7 +107,14 @@ export function ObjectTree() {
       </Group>
       {(analysis.global.hamiltonianLatex || analysis.global.lyapunov) && (
         <Group title="Scalar fields">
-          {analysis.global.hamiltonianLatex && <Row id="hamiltonian" label="Hamiltonian" formula={`H = ${analysis.global.hamiltonianLatex}`} color={palette.cycle} />}
+          {analysis.global.hamiltonianLatex && (
+            <Row
+              id="hamiltonian"
+              label="Hamiltonian"
+              formula={analysis.global.hamiltonianLatex.trim().startsWith('H') ? analysis.global.hamiltonianLatex : `H = ${analysis.global.hamiltonianLatex}`}
+              color={palette.cycle}
+            />
+          )}
           {analysis.global.lyapunov && <Row id="lyapunov" label="Lyapunov" formula={`V = ${analysis.global.lyapunov.vLatex}`} color={palette.wc} />}
         </Group>
       )}

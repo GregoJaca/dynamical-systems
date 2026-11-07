@@ -17,5 +17,5 @@ export function Katex({ tex, display = false }: { tex: string; display?: boolean
       target.textContent = tex;
     }
   }, [tex, display]);
-  return <span ref={node} className={display ? 'block overflow-x-auto py-0.5' : 'inline-block max-w-full overflow-x-auto align-middle'} />;
+  return <span ref={node} className={display ? 'math-display' : 'math-inline'} />;
 }

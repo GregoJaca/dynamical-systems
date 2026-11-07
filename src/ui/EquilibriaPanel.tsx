@@ -2,6 +2,7 @@ import { useSystemStore } from '../store/useSystemStore';
 import { Badge, Section } from './bits';
 import { complexLatex, coordList, matrixLatex, prettyLabel, rationalLabel, vectorLatex } from './format';
 import { Katex } from './Katex';
+import { RichText } from './RichText';
 
 export function EquilibriaPanel() {
   const analysis = useSystemStore((state) => state.analysis);
@@ -59,7 +60,7 @@ export function EquilibriaPanel() {
                 <Badge>{prettyLabel(eq.stability)}</Badge>
                 <Badge>{eq.hartmanGrobmanApplies ? 'Hartman–Grobman' : 'Linearization inconclusive'}</Badge>
               </div>
-              {eq.stabilityReasonLatex && <Katex tex={eq.stabilityReasonLatex} display />}
+              {eq.stabilityReasonLatex && <RichText text={eq.stabilityReasonLatex} />}
               {eq.subspaces.map((space) => (
                 <Katex key={`${eq.id}-${space.kind}`} tex={space.cartesianFormulaLatex} display />
               ))}
