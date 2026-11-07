@@ -14,16 +14,18 @@ const SERIES_COLORS = ['#38BDF8', '#FB7185', '#FBBF24', '#34D399', '#C4B5FD', '#
  * Time-series and projection panel. Designed for dimension >= 4 and usable as the
  * bottom drawer for 1D–3D. Orbits come from a small local RK4 on `compiled`.
  */
-export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint }: HigherDimViewProps) {
+export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint, role = 'stacked' }: HigherDimViewProps) {
   const palette = PALETTE[theme];
   const [horizon, setHorizon] = useState(12);
-  const [direction, setDirection] = useState<1 | -1>(1);
   const [mode, setMode] = useState<'2d' | '3d'>(spec.dimension >= 3 ? '3d' : '2d');
   const [axes, setAxes] = useState<number[]>(() => defaultAxes(spec.dimension, spec.dimension >= 3 ? '3d' : '2d'));
   const [y0, setY0] = useState<number[]>(() => defaultIc(spec.dimension));
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [hidden, setHidden] = useState<Record<number, boolean>>({});
+  const [timeScale, setTimeScale] = useState<'lin' | 'log'>('lin');
+  const [valueScale, setValueScale] = useState<'lin' | 'log'>('lin');
+  const scaleTouched = useRef(false);
 
   useEffect(() => {
     setY0(defaultIc(spec.dimension));
@@ -34,10 +36,9 @@ export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint }:
     setCursor(0);
   }, [spec.id, spec.dimension]);
 
-  const series = useMemo(() => integrateRk4(compiled, fitState(y0, spec.dimension), horizon, direction), [compiled, y0, horizon, direction, spec.dimension]);
-  const tLast = series.t[series.t.length - 1] ?? 0;
-  const tMin = Math.min(0, tLast);
-  const tMax = Math.max(0, tLast);
+  const series = useMemo(() => integrateBothWays(compiled, fitState(y0, spec.dimension), horizon), [compiled, y0, horizon, spec.dimension]);
+  const tMin = series.t[0] ?? -horizon;
+  const tMax = series.t[series.t.length - 1] ?? horizon;
   const shown = clamp(cursor, tMin, tMax);
   const state = sampleSeries(series, shown) ?? fitState(y0, spec.dimension);
   const speed = fieldSpeed(compiled, shown, state);
@@ -50,18 +51,24 @@ export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint }:
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       setCursor((current) => {
-        const end = tLast;
-        const span = Math.max(Math.abs(end), 1e-3);
-        const next = current + Math.sign(end || direction) * dt * (span / 8);
-        if (end >= 0 && next >= end) return 0;
-        if (end < 0 && next <= end) return 0;
-        return next;
+        const next = current + dt * (Math.max(tMax - tMin, 1) / 8);
+        return next >= tMax ? tMin : next;
       });
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, tLast, direction]);
+  }, [playing, tMin, tMax]);
+
+  useEffect(() => {
+    scaleTouched.current = false;
+  }, [spec.id]);
+
+  useEffect(() => {
+    if (scaleTouched.current) return;
+    setTimeScale('lin');
+    setValueScale(looksExponential(series) ? 'log' : 'lin');
+  }, [series]);
 
   const setModeAndAxes = (next: '2d' | '3d') => {
     setMode(next);
@@ -79,31 +86,108 @@ export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint }:
     onTracePoint(next);
   };
 
+  const showPortrait = role !== 'series' && spec.dimension >= 2;
+  const showSeries = role !== 'portrait';
+  const projection = spec.dimension >= 2 && showPortrait ? (
+    <>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ color: palette.muted }}>Axes</span>
+        {spec.dimension >= 3 ? (
+          <>
+            <button type="button" style={chip(palette, mode === '2d')} onClick={() => setModeAndAxes('2d')}>
+              2 variables
+            </button>
+            <button type="button" style={chip(palette, mode === '3d')} onClick={() => setModeAndAxes('3d')}>
+              3 variables
+            </button>
+          </>
+        ) : null}
+        {spec.stateVars.map((name, index) => (
+          <button key={`${name}:axis`} type="button" style={chip(palette, axes.includes(index))} onClick={() => toggleAxis(index)} aria-pressed={axes.includes(index)}>
+            {name}
+          </button>
+        ))}
+      </div>
+      <div className="stage" style={{ height: '62vh', minHeight: 420 }}>
+        {mode === '3d' && axes.length >= 3 ? (
+          <ProjectionScene3D
+            theme={theme}
+            names={axes.map((index) => spec.stateVars[index] ?? `x${index + 1}`)}
+            series={series}
+            axes={axes.slice(0, 3)}
+            cursor={shown}
+            equilibria={analysis.equilibria}
+          />
+        ) : (
+          <ProjectionPlot2D
+            palette={palette}
+            names={axes.slice(0, 2).map((index) => spec.stateVars[index] ?? `x${index + 1}`)}
+            series={series}
+            axes={axes.slice(0, 2)}
+            cursor={shown}
+            equilibria={analysis.equilibria}
+            theme={theme}
+            onPick={(u, v) => {
+              const next = state.slice();
+              const i = axes[0];
+              const j = axes[1];
+              if (i != null) next[i] = u;
+              if (j != null) next[j] = v;
+              traceState(next);
+            }}
+          />
+        )}
+      </div>
+    </>
+  ) : null;
+
   return (
-    <section style={panelStyle(palette)} aria-label="Time series and phase projections">
-      <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <strong>{spec.dimension >= 4 ? 'Time series and phase projections' : 'Time series drawer'}</strong>
-          <div style={{ color: palette.muted }}>
-            {spec.dimension}D · local RK4 · {series.t.length - 1} steps · {series.message}
+    <section style={panelStyle(palette)} aria-label={showPortrait ? 'Phase portrait' : 'Variables against time'}>
+      {showPortrait && (
+        <>
+          <h2>Phase portrait</h2>
+          <p className="lede">
+            A projection of one orbit. Pick which variables are the axes. The state has {spec.dimension} components, so this picture is not the whole flow.
+          </p>
+          {projection}
+        </>
+      )}
+
+      {showSeries && (
+        <>
+          <h2>Variables against time</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <label>
+              Scale{' '}
+              <select
+                className="scale-select"
+                aria-label="Axis scale"
+                value={`${timeScale}-${valueScale}`}
+                onChange={(event) => {
+                  scaleTouched.current = true;
+                  const [nextTime, nextValue] = event.target.value.split('-') as ['lin' | 'log', 'lin' | 'log'];
+                  setTimeScale(nextTime);
+                  setValueScale(nextValue);
+                }}
+              >
+                <option value="lin-lin">linear time, linear value</option>
+                <option value="lin-log">linear time, log value</option>
+                <option value="log-lin">log time, linear value</option>
+                <option value="log-log">log time, log value</option>
+              </select>
+            </label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button type="button" style={chip(palette, playing)} onClick={() => setPlaying((value) => !value)}>
+                {playing ? 'Stop' : 'Play'}
+              </button>
+            </div>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button type="button" style={chip(palette, playing)} onClick={() => setPlaying((value) => !value)}>
-            {playing ? 'Pause' : 'Play'}
-          </button>
-          <button type="button" style={chip(palette, direction === -1)} onClick={() => { setDirection((value) => (value === 1 ? -1 : 1)); setCursor(0); }}>
-            {direction === 1 ? 'Forward' : 'Backward'}
-          </button>
-          <button type="button" style={chip(palette, false)} onClick={() => traceState(state)}>
-            Trace x(t)
-          </button>
-        </div>
-      </header>
+        </>
+      )}
 
       <div style={sliderGrid}>
         {spec.stateVars.map((name, index) => {
-          const range = rangeFor(index, analysis.viewport, state[index] ?? 0);
+          const range = rangeFor(index, analysis.viewport, y0[index] ?? 0);
           return (
             <label key={`${name}:${index}`} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span>
@@ -130,7 +214,7 @@ export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint }:
           );
         })}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span>|T| = {horizon.toFixed(1)}</span>
+          <span>time from −{horizon.toFixed(1)} to {horizon.toFixed(1)}</span>
           <input
             type="range"
             min={0.5}
@@ -146,77 +230,41 @@ export function HigherDimView({ spec, analysis, theme, compiled, onTracePoint }:
         </label>
       </div>
 
-      <TimeSeriesChart
-        palette={palette}
-        names={spec.stateVars}
-        series={series}
-        hidden={hidden}
-        cursor={shown}
-        onCursor={setCursor}
-        onToggle={(index) => setHidden((current) => ({ ...current, [index]: !current[index] }))}
-      />
-
-      <div style={{ color: palette.muted }}>
-        t = {formatTick(shown, false)}
-        {speed ? ` · ‖f‖ = ${speed}` : ''}
-        {' · '}
-        {state.map((value, index) => `${spec.stateVars[index] ?? `x${index + 1}`} = ${formatTick(value, false)}`).join(' · ')}
-      </div>
-
-      {spec.dimension >= 2 ? (
+      {showSeries && (
         <>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ color: palette.muted }}>Project</span>
-            {spec.dimension >= 3 ? (
-              <>
-                <button type="button" style={chip(palette, mode === '2d')} onClick={() => setModeAndAxes('2d')}>
-                  2 variables
-                </button>
-                <button type="button" style={chip(palette, mode === '3d')} onClick={() => setModeAndAxes('3d')}>
-                  3 variables
-                </button>
-              </>
-            ) : null}
-            {spec.stateVars.map((name, index) => (
-              <button key={`${name}:axis`} type="button" style={chip(palette, axes.includes(index))} onClick={() => toggleAxis(index)} aria-pressed={axes.includes(index)}>
-                {name}
-              </button>
-            ))}
+          <TimeSeriesChart
+            palette={palette}
+            names={spec.stateVars}
+            series={series}
+            hidden={hidden}
+            cursor={shown}
+            timeScale={timeScale}
+            valueScale={valueScale}
+            onCursor={setCursor}
+            onToggle={(index) => setHidden((current) => ({ ...current, [index]: !current[index] }))}
+          />
+          <div style={{ color: palette.muted }}>
+            t = {formatTick(shown, false)}
+            {speed ? ` · ‖f‖ = ${speed}` : ''}
+            {' · '}
+            {state.map((value, index) => `${spec.stateVars[index] ?? `x${index + 1}`} = ${formatTick(value, false)}`).join(' · ')}
           </div>
-          {mode === '3d' && axes.length >= 3 ? (
-            <ProjectionScene3D
-              theme={theme}
-              names={axes.map((index) => spec.stateVars[index] ?? `x${index + 1}`)}
-              series={series}
-              axes={axes.slice(0, 3)}
-              cursor={shown}
-              equilibria={analysis.equilibria}
-            />
-          ) : (
-            <ProjectionPlot2D
-              palette={palette}
-              names={axes.slice(0, 2).map((index) => spec.stateVars[index] ?? `x${index + 1}`)}
-              series={series}
-              axes={axes.slice(0, 2)}
-              cursor={shown}
-              equilibria={analysis.equilibria}
-              theme={theme}
-              onPick={(u, v) => {
-                const next = state.slice();
-                const i = axes[0];
-                const j = axes[1];
-                if (i != null) next[i] = u;
-                if (j != null) next[j] = v;
-                traceState(next);
-              }}
-            />
-          )}
         </>
-      ) : (
-        <div style={{ color: palette.muted }}>A phase projection needs at least two state variables. The time series above is the full portrait.</div>
       )}
     </section>
   );
+}
+
+function mapAxis(value: number, scale: 'lin' | 'log'): number {
+  if (scale === 'lin') return value;
+  const sign = value < 0 ? -1 : 1;
+  return sign * Math.log10(1 + Math.abs(value));
+}
+
+function unmapAxis(mapped: number, scale: 'lin' | 'log'): number {
+  if (scale === 'lin') return mapped;
+  const sign = mapped < 0 ? -1 : 1;
+  return sign * (10 ** Math.abs(mapped) - 1);
 }
 
 function TimeSeriesChart({
@@ -225,6 +273,8 @@ function TimeSeriesChart({
   series,
   hidden,
   cursor,
+  timeScale,
+  valueScale,
   onCursor,
   onToggle,
 }: {
@@ -233,12 +283,14 @@ function TimeSeriesChart({
   series: Rk4Series;
   hidden: Record<number, boolean>;
   cursor: number;
+  timeScale: 'lin' | 'log';
+  valueScale: 'lin' | 'log';
   onCursor: (time: number) => void;
   onToggle: (index: number) => void;
 }) {
   const width = 720;
   const height = 210;
-  const pad = { l: 48, r: 12, t: 14, b: 28 };
+  const pad = { l: 78, r: 16, t: 18, b: 36 };
   const dim = Math.max(names.length, series.y[0]?.length ?? 0);
   const active = Array.from({ length: dim }, (_, index) => index).filter((index) => !hidden[index]);
   let yMin = Infinity;
@@ -264,16 +316,20 @@ function TimeSeriesChart({
   yMax += yPad;
   const t0 = series.t[0] ?? 0;
   const t1 = series.t[series.t.length - 1] ?? 0;
-  const xOf = (time: number) => pad.l + ((time - t0) / (t1 - t0 || 1)) * (width - pad.l - pad.r);
-  const yOf = (value: number) => pad.t + ((yMax - value) / (yMax - yMin || 1)) * (height - pad.t - pad.b);
+  const tLo = mapAxis(t0, timeScale);
+  const tHi = mapAxis(t1, timeScale);
+  const vLo = mapAxis(yMin, valueScale);
+  const vHi = mapAxis(yMax, valueScale);
+  const xOf = (time: number) => pad.l + ((mapAxis(time, timeScale) - tLo) / (tHi - tLo || 1)) * (width - pad.l - pad.r);
+  const yOf = (value: number) => pad.t + ((vHi - mapAxis(value, valueScale)) / (vHi - vLo || 1)) * (height - pad.t - pad.b);
   const cursorX = xOf(cursor);
 
   const seek = (event: ReactPointerEvent<SVGSVGElement>) => {
     const ctm = event.currentTarget.getScreenCTM();
     if (!ctm) return;
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
-    const u = (point.x - pad.l) / (width - pad.l - pad.r);
-    onCursor(t0 + clamp(u, 0, 1) * (t1 - t0));
+    const u = clamp((point.x - pad.l) / (width - pad.l - pad.r), 0, 1);
+    onCursor(unmapAxis(tLo + u * (tHi - tLo), timeScale));
   };
 
   return (
@@ -289,9 +345,9 @@ function TimeSeriesChart({
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Time series" style={{ background: 'transparent', touchAction: 'none' }} onPointerDown={seek} onPointerMove={(event) => { if (event.buttons === 1) seek(event); }}>
         <line x1={pad.l} y1={yOf(0)} x2={width - pad.r} y2={yOf(0)} stroke={palette.axis} strokeOpacity={0.45} />
         <line x1={xOf(0)} y1={pad.t} x2={xOf(0)} y2={height - pad.b} stroke={palette.axis} strokeOpacity={0.45} />
-        <text x={pad.l} y={height - 8} fill={palette.muted} fontSize={11}>t</text>
-        <text x={8} y={pad.t + 4} fill={palette.muted} fontSize={11}>{formatTick(yMax, false)}</text>
-        <text x={8} y={height - pad.b} fill={palette.muted} fontSize={11}>{formatTick(yMin, false)}</text>
+        <text x={pad.l} y={height - 6} fill={palette.muted} fontSize={18}>t</text>
+        <text x={6} y={pad.t + 8} fill={palette.muted} fontSize={18}>{formatTick(yMax, false)}</text>
+        <text x={6} y={height - pad.b} fill={palette.muted} fontSize={18}>{formatTick(yMin, false)}</text>
         {active.map((index) => {
           const column = series.y.map((row) => row[index] ?? Number.NaN);
           const pairs = downsamplePairs(series.t, column, 600);
@@ -373,7 +429,7 @@ function ProjectionPlot2D({
   };
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Projected orbit" style={{ background: 'transparent', cursor: 'crosshair' }} onClick={pick}>
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" role="img" aria-label="Phase portrait" style={{ background: 'transparent', cursor: 'crosshair' }} onClick={pick}>
       <rect x={originX} y={originY} width={plot} height={plot} fill="none" stroke={palette.axis} strokeOpacity={0.45} />
       <text x={originX + plot - 4} y={originY + plot + 16} fill={palette.muted} fontSize={12} textAnchor="end">{names[0] ?? 'u'}</text>
       <text x={originX - 8} y={originY + 12} fill={palette.muted} fontSize={12} textAnchor="end">{names[1] ?? 'v'}</text>
@@ -411,7 +467,7 @@ function ProjectionScene3D({
     return math ? toThree(math) : projected.marker;
   }, [series, axes, cursor, projected.marker]);
   return (
-    <div style={{ position: 'relative', height: 300, border: `1px solid ${palette.axis}`, borderRadius: 10, overflow: 'hidden' }}>
+    <div style={{ position: 'relative', height: '100%', minHeight: 280, overflow: 'hidden' }}>
       <Canvas camera={{ position: [3, 2.4, 3], fov: 45, near: 0.01, far: 200 }} gl={{ antialias: true, toneMapping: NoToneMapping }} dpr={[1, 1.75]}>
         <color attach="background" args={[palette.bg]} />
         <ambientLight intensity={0.85} />
@@ -582,6 +638,29 @@ function fitState(state: readonly number[], dimension: number): number[] {
     if (typeof value === 'number' && Number.isFinite(value)) next[index] = value;
   }
   return next;
+}
+
+function integrateBothWays(compiled: CompiledSystem | null, y0: readonly number[], horizon: number): Rk4Series {
+  const backward = integrateRk4(compiled, y0, horizon, -1);
+  const forward = integrateRk4(compiled, y0, horizon, 1);
+  const t = [...backward.t].reverse();
+  const y = [...backward.y].reverse();
+  if (t.length > 0 && forward.t.length > 0) {
+    t.pop();
+    y.pop();
+  }
+  return {
+    t: [...t, ...forward.t],
+    y: [...y, ...forward.y],
+    status: forward.status === 'unavailable' ? forward.status : backward.status === 'unavailable' ? backward.status : 'ok',
+    message: '',
+  };
+}
+
+function looksExponential(series: Rk4Series): boolean {
+  const magnitudes = series.y.flat().map((value) => Math.abs(value)).filter((value) => Number.isFinite(value) && value > 1e-6);
+  if (magnitudes.length < 8) return false;
+  return Math.max(...magnitudes) / Math.min(...magnitudes) > 40;
 }
 
 function rangeFor(index: number, viewport: ViewportBounds, value: number): { min: number; max: number; step: number } {
