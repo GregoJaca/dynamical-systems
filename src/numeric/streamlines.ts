@@ -2,8 +2,8 @@ import type { CompiledSystem, EquilibriumAnalysis, ManifoldBranch, StreamlineSeg
 import { integrateRK45 } from './rk45';
 
 /**
- * Jobard–Lefer seeding: separatrices first, then eigendirection rings, then a
- * separation-distance queue. Integration itself is adaptive RK45.
+ * Jobard–Lefer seeding: rings around every equilibrium, then a separation-distance
+ * queue. Manifold curves are kept out of this list so a saddle separatrix is not drawn twice.
  */
 export function generateStreamlines(
   compiled: CompiledSystem,
@@ -13,32 +13,28 @@ export function generateStreamlines(
 ): StreamlineSegment[] {
   if (compiled.stateVars.length < 2) return [];
   const width = viewport.xMax - viewport.xMin;
-  const dSep = width / 28;
+  const dSep = width / 22;
   const grid = new Occupancy(viewport, dSep);
   const curves: StreamlineSegment[] = [];
   const queue: Array<{ x: number; y: number; reason: string }> = [];
 
   for (const branch of manifolds) {
-    if (branch.kind === 'Wc' || branch.points.length < 2) continue;
-    const home = equilibria.find((eq) => eq.id === branch.equilibriumId);
-    const segment = fromPoints(branch.points, compiled, equilibria, 'separatrix', `${branch.kind} separatrix of ${home ? coordText(home.coords) : branch.equilibriumId}`);
-    segment.id = `separatrix-${curves.length}`;
-    curves.push(segment);
-    for (const point of segment.points) grid.mark(point[0] ?? 0, point[1] ?? 0);
+    if (branch.kind === 'Wc') continue;
+    for (const point of branch.points) grid.mark(point[0] ?? 0, point[1] ?? 0);
   }
 
   for (const eq of equilibria) {
     const kind = eq.classification2D ?? '';
-    if (kind.includes('node') || kind.includes('focus') || kind.includes('center')) {
-      const scale = Math.min(dSep * 1.4, width * 0.08);
-      for (let k = 0; k < 8; k += 1) {
-        const angle = (2 * Math.PI * k) / 8;
-        queue.push({
-          x: (eq.coords[0] ?? 0) + scale * Math.cos(angle),
-          y: (eq.coords[1] ?? 0) + scale * Math.sin(angle),
-          reason: `Characteristic orbit near ${coordText(eq.coords)}`,
-        });
-      }
+    const around = kind.includes('node') || kind.includes('focus') || kind.includes('center');
+    const count = around ? 10 : 6;
+    const scale = Math.min(dSep * (around ? 1.15 : 1.6), width * 0.07);
+    for (let k = 0; k < count; k += 1) {
+      const angle = (2 * Math.PI * k) / count + (around ? 0 : 0.4);
+      queue.push({
+        x: (eq.coords[0] ?? 0) + scale * Math.cos(angle),
+        y: (eq.coords[1] ?? 0) + scale * Math.sin(angle),
+        reason: `Characteristic orbit near ${coordText(eq.coords)}`,
+      });
     }
   }
 
@@ -54,11 +50,18 @@ export function generateStreamlines(
     }
   }
 
+  const room = Math.min(64, 16 + equilibria.length * 10);
+  const later: Array<{ x: number; y: number; reason: string }> = [];
   let guard = 0;
-  while (queue.length > 0 && curves.length < 18 && guard < 40) {
+  while (queue.length > 0 && curves.length < room && guard < 160) {
     guard += 1;
     const seed = queue.shift()!;
-    if (!inside(seed.x, seed.y, viewport) || grid.blocked(seed.x, seed.y)) continue;
+    const characteristic = seed.reason.startsWith('Characteristic');
+    if (!characteristic) {
+      later.push(seed);
+      continue;
+    }
+    if (!inside(seed.x, seed.y, viewport)) continue;
     const forward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, 1);
     const backward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, -1);
     const points = [...backward.points.slice().reverse(), [seed.x, seed.y], ...forward.points];
@@ -81,8 +84,24 @@ export function generateStreamlines(
       const tx = (next[0] ?? 0) - (point[0] ?? 0);
       const ty = (next[1] ?? 0) - (point[1] ?? 0);
       const norm = Math.hypot(tx, ty) || 1;
-      queue.push({ x: (point[0] ?? 0) + (dSep * -ty) / norm, y: (point[1] ?? 0) + (dSep * tx) / norm, reason: 'Background streamline' });
-      queue.push({ x: (point[0] ?? 0) - (dSep * -ty) / norm, y: (point[1] ?? 0) - (dSep * tx) / norm, reason: 'Background streamline' });
+      later.push({ x: (point[0] ?? 0) + (dSep * -ty) / norm, y: (point[1] ?? 0) + (dSep * tx) / norm, reason: 'Background streamline' });
+      later.push({ x: (point[0] ?? 0) - (dSep * -ty) / norm, y: (point[1] ?? 0) - (dSep * tx) / norm, reason: 'Background streamline' });
+    }
+  }
+  while (later.length > 0 && curves.length < room && guard < 160) {
+    guard += 1;
+    const seed = later.shift()!;
+    if (!inside(seed.x, seed.y, viewport) || grid.blocked(seed.x, seed.y)) continue;
+    const forward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, 1);
+    const backward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, -1);
+    const points = [...backward.points.slice().reverse(), [seed.x, seed.y], ...forward.points];
+    if (points.length < 4) continue;
+    const segment = fromPoints(points, compiled, equilibria, 'background_streamline', seed.reason, forward.limitId, backward.limitId);
+    segment.id = `orbit-${curves.length}`;
+    curves.push(segment);
+    for (let index = 0; index < points.length; index += 4) {
+      const point = points[index]!;
+      grid.mark(point[0] ?? 0, point[1] ?? 0);
     }
   }
   return curves.map((curve, index) => ({ ...curve, id: `stream-${index}` }));

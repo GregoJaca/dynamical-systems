@@ -204,6 +204,9 @@ export interface BasinField {
 export interface PolarAnalysis {
   isRecommended: boolean;
   recommendationReason?: string;
+  /** Translation used before polar coordinates. Absent when the chart is centered at the origin. */
+  origin?: number[];
+  originLatex?: string;
   rDotLatex: string;
   thetaDotLatex: string;
   rDotExpr: string;

@@ -18,14 +18,9 @@ import { objectAnchor, objectFormula, viewportKey } from './formulas';
 import { hitTestPhase } from './hitTest';
 import { linearField, precomputeDroplet, sampleDroplet, synthesizeLinearOrbits, type DropletCache } from './integrate';
 import { spawnParticles, stepParticles, type SimParticle } from './particles';
-import { contourLines, sampleGrid } from './contours';
+import { contourLines, levelContours, sampleGrid } from './contours';
 import { compileScalarField } from './scalars';
-import {
-  paintPhaseFrame,
-  rasterBasins,
-  rasterScalar,
-  type ArrowSample,
-} from './paint';
+import { paintPhaseFrame, rasterBasins, type ArrowSample } from './paint';
 
 interface Size {
   w: number;
@@ -37,7 +32,7 @@ interface FieldCache {
   basin: HTMLCanvasElement | null;
   lyapKey: string;
   lyapAt: number;
-  lyap: HTMLCanvasElement | null;
+  lyap: number[][][] | null;
   hamKey: string;
   hamAt: number;
   ham: number[][][] | null;
@@ -211,12 +206,12 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
   const lyapEval = useMemo(
     () =>
       compileScalarField(
-        props.analysis.global.lyapunov?.vDotExpr,
+        props.analysis.global.lyapunov?.vExpr,
         props.spec.stateVars,
         parameterRecord(props.spec, props.compiled),
         props.spec.independentVar,
       ),
-    [props.analysis.global.lyapunov?.vDotExpr, props.spec.revision, props.spec.independentVar, paramKey, props.spec.stateVars],
+    [props.analysis.global.lyapunov?.vExpr, props.spec.revision, props.spec.independentVar, paramKey, props.spec.stateVars],
   );
   const hamEval = useMemo(
     () =>
@@ -325,7 +320,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
           linearEquilibrium: current.linearization.mode === 'off' ? null : equilibrium,
           compareMode: current.linearization.mode,
           basinCanvas: cacheRef.current.basin,
-          lyapunovCanvas: cacheRef.current.lyap,
+          lyapunov: cacheRef.current.lyap,
           hamiltonian: cacheRef.current.ham,
           arrows: cacheRef.current.arrows,
           linearArrows: cacheRef.current.linearArrows,
@@ -666,10 +661,10 @@ function refreshCaches(
     cache.basin = basinStamp && field ? rasterBasins(field) : null;
   }
   const lyapKey = props.layers.lyapunov && lyapEval ? `${viewportKey(props.analysis.viewport)}:${props.analysis.revision}` : '';
-  if (lyapKey && lyapEval && cache.lyapKey !== lyapKey && (cache.lyap == null || now - cache.lyapAt > 90)) {
+  if (lyapKey && lyapEval && cache.lyapKey !== lyapKey) {
     cache.lyapKey = lyapKey;
     cache.lyapAt = now;
-    cache.lyap = rasterScalar(lyapEval, view.xMin, view.xMax, view.yMin, view.yMax);
+    cache.lyap = levelContours(lyapEval, view.xMin, view.xMax, view.yMin, view.yMax);
   }
   if (!lyapKey) cache.lyap = null;
   const hamKey = props.layers.hamiltonianContours && hamEval ? lyapKey || `${viewportKey(props.analysis.viewport)}:${props.analysis.revision}` : '';

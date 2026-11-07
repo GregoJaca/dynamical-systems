@@ -135,55 +135,6 @@ export function rasterBasins(field: BasinField): HTMLCanvasElement | null {
   return canvas;
 }
 
-export function rasterScalar(
-  evaluate: (x: number, y: number) => number,
-  xMin: number,
-  xMax: number,
-  yMin: number,
-  yMax: number,
-  nx = 40,
-  ny = 40,
-): HTMLCanvasElement | null {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = nx;
-  canvas.height = ny;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  const values: number[] = [];
-  const grid: number[] = [];
-  for (let iy = 0; iy < ny; iy += 1) {
-    const y = yMax - ((yMax - yMin) * iy) / (ny - 1);
-    for (let ix = 0; ix < nx; ix += 1) {
-      const x = xMin + ((xMax - xMin) * ix) / (nx - 1);
-      const value = evaluate(x, y);
-      grid.push(value);
-      if (Number.isFinite(value)) values.push(Math.abs(value));
-    }
-  }
-  if (values.length < (nx * ny) / 5) return null;
-  values.sort((a, b) => a - b);
-  const maxAbs = Math.max(1e-6, values[Math.floor(values.length * 0.9)] ?? 1);
-  const image = ctx.createImageData(nx, ny);
-  for (let i = 0; i < grid.length; i += 1) {
-    const value = grid[i] ?? 0;
-    const t = Number.isFinite(value) ? Math.max(-1, Math.min(1, value / maxAbs)) : 0;
-    const pixel = i * 4;
-    if (t >= 0) {
-      image.data[pixel] = 220;
-      image.data[pixel + 1] = Math.round(80 + (1 - t) * 80);
-      image.data[pixel + 2] = Math.round(90 + (1 - t) * 70);
-    } else {
-      image.data[pixel] = Math.round(40 + (1 + t) * 70);
-      image.data[pixel + 1] = Math.round(120 + (1 + t) * 50);
-      image.data[pixel + 2] = 210;
-    }
-    image.data[pixel + 3] = Number.isFinite(value) ? 110 : 0;
-  }
-  ctx.putImageData(image, 0, 0);
-  return canvas;
-}
-
 export function strokeWorldPath(
   ctx: CanvasRenderingContext2D,
   view: ViewRect,
@@ -414,7 +365,7 @@ export interface PhaseFrame {
   linearEquilibrium: EquilibriumAnalysis | null;
   compareMode: CompareMode;
   basinCanvas: HTMLCanvasElement | null;
-  lyapunovCanvas: HTMLCanvasElement | null;
+  lyapunov: number[][][] | null;
   hamiltonian: number[][][] | null;
   arrows: ArrowSample[] | null;
   linearArrows: ArrowSample[] | null;
@@ -464,8 +415,10 @@ export function paintPhaseFrame(frame: PhaseFrame): void {
       const field = analysis.basinField;
       blitWorldImage(ctx, view, frame.basinCanvas, field.xMin, field.xMax, field.yMin, field.yMax, 1);
     }
-    if (frame.layers.lyapunov && frame.lyapunovCanvas) {
-      blitWorldImage(ctx, view, frame.lyapunovCanvas, view.xMin, view.xMax, view.yMin, view.yMax, 1);
+    if (frame.layers.lyapunov && frame.lyapunov) {
+      for (const path of frame.lyapunov) {
+        strokeWorldPath(ctx, view, path, palette.nullclineX, curveWidth('lyapunov', frame.focusId, frame.selectedId, 1.45), curveAlpha('lyapunov', frame.focusId, 0.9), true);
+      }
     }
     if (frame.layers.hamiltonianContours && frame.hamiltonian) {
       for (const path of frame.hamiltonian) {

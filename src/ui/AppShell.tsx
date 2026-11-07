@@ -99,6 +99,7 @@ function Portrait() {
         <section className="below">
           <h2>Polar coordinates</h2>
           <p className="lede">
+            {polar?.originLatex ? `Centered at the equilibrium ${polar.originLatex}. ` : ''}
             Distance r runs left to right. Angle θ runs upward. A vertical line is a circle in the phase portrait.
           </p>
           <div className="stage polar-stage">
@@ -178,7 +179,7 @@ function Notes() {
       {spec.dimension === 2 && (
         <section>
           <h2>Trace and determinant</h2>
-          <p className="lede">Where this system’s equilibria sit in the classification plane. The picture of the flow stays on the portrait.</p>
+          <p className="lede">Each labeled dot is one equilibrium of this system, plotted by its trace and determinant. The picture of the flow stays on the portrait.</p>
           <div className="trace-det">
             <TraceDetMinimap analysis={analysis} theme={theme} selectedEquilibriumId={selectedEquilibriumId} onSelectEquilibrium={selectEquilibrium} />
           </div>

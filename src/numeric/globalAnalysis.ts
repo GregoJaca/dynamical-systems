@@ -90,6 +90,16 @@ export function finalizeGlobal(
   const lyapunov = analyzeLyapunov(spec, compiled, bundle.global.hamiltonianExpr);
   if (lyapunov) bundle.global.lyapunov = lyapunov;
   if (bundle.polar && spec.dimension === 2) {
+    const shift = polarTranslation(equilibria);
+    if (shift) {
+      const moved = polarSkeleton(spec.rhsExpressions, spec.stateVars, shift.coords);
+      bundle.polar.rDotExpr = moved.rDotExpr;
+      bundle.polar.thetaDotExpr = moved.thetaDotExpr;
+      bundle.polar.rDotLatex = moved.rDotLatex;
+      bundle.polar.thetaDotLatex = moved.thetaDotLatex;
+      bundle.polar.origin = shift.coords;
+      bundle.polar.originLatex = shift.latex;
+    }
     const recommendation = recommendPolar(spec, bundle.polar, equilibria, limitCycles);
     bundle.polar.isRecommended = recommendation.recommended;
     bundle.polar.recommendationReason = recommendation.reason;
@@ -315,10 +325,12 @@ function jordanLatex(matrix: number[][]): string {
   ]);
 }
 
-function polarSkeleton(rhs: string[], vars: string[]): PolarAnalysis {
+function polarSkeleton(rhs: string[], vars: string[], origin: number[] = [0, 0]): PolarAnalysis {
   const [x, y] = vars;
-  const fx = substituteExpr(rhs[0] ?? '0', { [x!]: '(r * cos(theta))', [y!]: '(r * sin(theta))' });
-  const fy = substituteExpr(rhs[1] ?? '0', { [x!]: '(r * cos(theta))', [y!]: '(r * sin(theta))' });
+  const ox = formatShift(origin[0] ?? 0);
+  const oy = formatShift(origin[1] ?? 0);
+  const fx = substituteExpr(rhs[0] ?? '0', { [x!]: `(${ox} + r * cos(theta))`, [y!]: `(${oy} + r * sin(theta))` });
+  const fy = substituteExpr(rhs[1] ?? '0', { [x!]: `(${ox} + r * cos(theta))`, [y!]: `(${oy} + r * sin(theta))` });
   const rDot = `(((r * cos(theta)) * (${fx}) + (r * sin(theta)) * (${fy})) / r)`;
   const thetaDot = `(((r * cos(theta)) * (${fy}) - (r * sin(theta)) * (${fx})) / (r ^ 2))`;
   return {
@@ -376,6 +388,28 @@ function atOrigin(eq: EquilibriumAnalysis): boolean {
   return eq.coords.length >= 2 && eq.coords.every((value) => Math.abs(value) < 1e-5);
 }
 
+/** A lone equilibrium is moved to the origin before polar coordinates are tried. */
+function polarTranslation(equilibria: EquilibriumAnalysis[]): { coords: number[]; latex: string } | null {
+  if (equilibria.length !== 1) return null;
+  const eq = equilibria[0]!;
+  if (eq.coords.length < 2 || atOrigin(eq)) return null;
+  const coords = [eq.coords[0] ?? 0, eq.coords[1] ?? 0];
+  return { coords, latex: `(${coords.map((value) => latexNumber(value).replace(/\\frac\{(\d+)\}\{(\d+)\}/g, '$1/$2')).join(', ')})` };
+}
+
+function formatShift(value: number): string {
+  if (Math.abs(value) < 1e-8) return '0';
+  for (let den = 1; den <= 12; den += 1) {
+    const num = Math.round(value * den);
+    if (Math.abs(value - num / den) < 1e-8) {
+      const body = den === 1 ? String(num) : `${num}/${den}`;
+      return body.startsWith('-') || den !== 1 ? `(${body})` : body;
+    }
+  }
+  const text = Number(value.toPrecision(12)).toString();
+  return text.startsWith('-') ? `(${text})` : text;
+}
+
 /**
  * Polar is the useful chart when the whole portrait is organized around the
  * origin: a center, a focus, or a limit cycle, and no second equilibrium.
@@ -389,8 +423,9 @@ function recommendPolar(
   limitCycles: LimitCycle[],
 ): { recommended: boolean; reason?: string } {
   if (spec.dimension !== 2) return { recommended: false };
-  const origin = equilibria.find(atOrigin);
-  if (!origin || equilibria.some((eq) => !atOrigin(eq))) return { recommended: false };
+  const shifted = equilibria.length === 1 ? equilibria[0] : undefined;
+  const origin = equilibria.find(atOrigin) ?? (shifted && !equilibria.some((eq) => eq !== shifted) ? shifted : undefined);
+  if (!origin || equilibria.some((eq) => eq !== origin && !atOrigin(eq))) return { recommended: false };
   const kind = origin.classification2D ?? '';
   const rotating = kind.includes('focus') || kind.includes('center');
   const parameters = Object.fromEntries(Object.entries(spec.parameters).map(([name, item]) => [name, item.value]));
@@ -398,7 +433,9 @@ function recommendPolar(
   if (radialOnly && (rotating || limitCycles.length > 0)) {
     return { recommended: true, reason: 'The radial equation is independent of θ.' };
   }
-  if (rotating) return { recommended: true, reason: 'The origin is a focus or a center.' };
+  if (rotating) {
+    return { recommended: true, reason: atOrigin(origin) ? 'The origin is a focus or a center.' : 'After a shift to the equilibrium, the system is a focus or a center.' };
+  }
   if (limitCycles.length > 0) return { recommended: true, reason: 'A limit cycle encloses the origin.' };
   if (radialOnly) return { recommended: true, reason: 'The radial equation is independent of θ.' };
   return { recommended: false };
@@ -551,7 +588,7 @@ function theorems(spec: SystemSpec, bundle: GlobalBundle, equilibria: Equilibriu
       name: 'Stable manifold theorem',
       perkoReference: 'Perko §2.7',
       statementLatex: 'A hyperbolic saddle has immersed stable and unstable manifolds tangent to the stable and unstable subspaces.',
-      applicationToSystemLatex: 'The computed separatrices are tangent to the real eigendirections of each saddle.',
+      applicationToSystemLatex: 'The stable and unstable manifolds are tangent to the eigendirections. In the plane, the branches of a hyperbolic saddle are the separatrices.',
     });
   }
   if (equilibria.some((eq) => !eq.isHyperbolic)) {

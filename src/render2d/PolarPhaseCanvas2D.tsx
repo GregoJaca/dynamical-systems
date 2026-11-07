@@ -5,8 +5,9 @@ import { matchesFocus } from '../core/focus';
 import { screenToWorld, worldToScreen, type ViewRect } from './geometry';
 import { type Rhs } from './integrate';
 import { spawnParticles, stepParticles, type SimParticle } from './particles';
+import { levelContours } from './contours';
 import { cartesianToPolar, seedPolarOrbits } from './polarFlow';
-import { compilePolarField } from './scalars';
+import { compilePolarField, compileScalarField } from './scalars';
 import { curveAlpha, curveWidth, drawBackground, drawGrid, drawParticles, drawVectorArrows, strokeArrow, strokeWorldPath, type ArrowSample } from './paint';
 
 interface PolarBounds {
@@ -27,7 +28,13 @@ function suggestedRadius(props: PolarCanvasProps): number {
   return Math.max(1.25, Math.min(corner || 3, 6));
 }
 
-function polarField(compiled: CompiledSystem | null, symbolic: ((r: number, theta: number) => [number, number]) | null): Rhs {
+function polarField(
+  compiled: CompiledSystem | null,
+  symbolic: ((r: number, theta: number) => [number, number]) | null,
+  origin: number[],
+): Rhs {
+  const ox = origin[0] ?? 0;
+  const oy = origin[1] ?? 0;
   return (_t, state, params) => {
     const r = state[0] ?? 0;
     const theta = state[1] ?? 0;
@@ -36,13 +43,15 @@ function polarField(compiled: CompiledSystem | null, symbolic: ((r: number, thet
       if (Number.isFinite(value[0]) && Number.isFinite(value[1])) return value;
     }
     if (!compiled || Math.abs(r) < 1e-5) return [0, 0];
-    const x = r * Math.cos(theta);
-    const y = r * Math.sin(theta);
+    const x = ox + r * Math.cos(theta);
+    const y = oy + r * Math.sin(theta);
     try {
       const velocity = compiled.f(0, [x, y], params);
       const fx = velocity[0] ?? 0;
       const fy = velocity[1] ?? 0;
-      return [(x * fx + y * fy) / r, (x * fy - y * fx) / (r * r)];
+      const c = Math.cos(theta);
+      const s = Math.sin(theta);
+      return [c * fx + s * fy, (c * fy - s * fx) / r];
     } catch {
       return [0, 0];
     }
@@ -70,8 +79,9 @@ function strokePolarPieces(
   alpha: number,
   dashed = false,
   arrow = false,
+  origin: number[] = [0, 0],
 ): void {
-  for (const piece of cartesianToPolar(points)) {
+  for (const piece of cartesianToPolar(points, origin)) {
     strokeWorldPath(ctx, view, piece, color, width, alpha, dashed);
     if (arrow) strokeArrow(ctx, view, piece, color, alpha);
   }
@@ -100,7 +110,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
       props.analysis.coordinateTransforms.polar2D?.thetaDotExpr,
       props.compiled?.parameterValues ?? {},
     );
-    const field = polarField(props.compiled, symbolic);
+    const field = polarField(props.compiled, symbolic, props.analysis.coordinateTransforms.polar2D?.origin ?? [0, 0]);
     const params = props.compiled?.parameterValues ?? {};
     const polarInfo = props.analysis.coordinateTransforms.polar2D;
     const thetaDepends = (polarInfo?.rDotExpr ?? '').includes('theta') || (polarInfo?.thetaDotExpr ?? '').includes('theta');
@@ -123,6 +133,27 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     }
     return samples;
   }, [curves.field, props.compiled, bounds]);
+
+  const lyapunovLevels = useMemo(() => {
+    if (!props.layers.lyapunov) return [];
+    const field = compileScalarField(
+      props.analysis.global.lyapunov?.vExpr,
+      props.spec.stateVars,
+      props.compiled?.parameterValues ?? {},
+      props.spec.independentVar,
+    );
+    if (!field) return [];
+    const view = props.analysis.viewport;
+    return levelContours(field, view.xMin, view.xMax, view.yMin, view.yMax);
+  }, [
+    props.layers.lyapunov,
+    props.analysis.global.lyapunov?.vExpr,
+    props.analysis.viewport,
+    props.analysis.revision,
+    props.spec.stateVars,
+    props.spec.independentVar,
+    props.compiled,
+  ]);
 
   const particleKey = `${props.analysis.revision}:${props.particles.count}:${curves.pieces.length}`;
   const particleKeyRef = useRef('');
@@ -186,8 +217,14 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
         drawBackground(ctx, current.theme, w, h);
         drawGrid(ctx, liveView, current.theme, false, true);
         const focusId = current.hoverObjectId;
+        const polarOrigin = current.analysis.coordinateTransforms.polar2D?.origin ?? [0, 0];
         const selectedId = current.selectedObjectId;
         if (current.layers.vectorField) drawVectorArrows(ctx, liveView, arrowRef.current, palette.muted);
+        if (current.layers.lyapunov) {
+          for (const path of lyapunovRef.current) {
+            strokePolarPieces(ctx, liveView, path, palette.nullclineX, 1.45, 0.9, true, false, polarOrigin);
+          }
+        }
         if (current.layers.streamlines) {
           curvesRef.current.forEach((points, index) => {
             const id = `stream-polar-${index}`;
@@ -207,6 +244,8 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
                 curveWidth(nullcline.id, focusId, selectedId, 1.4),
                 curveAlpha(nullcline.id, focusId, 0.9),
                 true,
+                false,
+                polarOrigin,
               );
             }
           }
@@ -223,6 +262,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
               curveAlpha(segment.id, focusId, 0.95),
               false,
               true,
+              polarOrigin,
             );
           }
         }
@@ -238,6 +278,9 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
               color,
               curveWidth(manifold.id, focusId, selectedId, 2.15),
               curveAlpha(manifold.id, focusId, 0.95),
+              false,
+              false,
+              polarOrigin,
             );
           }
         }
@@ -250,7 +293,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
               const samples = lineSamples(equilibrium.coords, basis, reach);
               const id = `${equilibrium.id}:${subspace.kind}`;
               const color = subspace.kind === 'Es' ? palette.es : subspace.kind === 'Eu' ? palette.eu : palette.ec;
-              strokePolarPieces(ctx, liveView, samples, color, curveWidth(id, focusId, selectedId, 1.3), curveAlpha(id, focusId, 0.85), true);
+              strokePolarPieces(ctx, liveView, samples, color, curveWidth(id, focusId, selectedId, 1.3), curveAlpha(id, focusId, 0.85), true, false, polarOrigin);
             }
           }
         }
@@ -280,16 +323,18 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
               curveWidth(cycle.id, focusId, selectedId, 2.2),
               curveAlpha(cycle.id, focusId, 1),
               cycle.stability === 'unstable',
+              false,
+              polarOrigin,
             );
           }
         }
         for (const orbit of current.userOrbits) {
-          strokePolarPieces(ctx, liveView, orbit.points, palette.droplet, curveWidth(orbit.id, focusId, selectedId, 2), curveAlpha(orbit.id, focusId, 0.95), false, true);
+          strokePolarPieces(ctx, liveView, orbit.points, palette.droplet, curveWidth(orbit.id, focusId, selectedId, 2), curveAlpha(orbit.id, focusId, 0.95), false, true, polarOrigin);
         }
         if (current.layers.equilibria) {
           for (const equilibrium of current.analysis.equilibria) {
-            const x = equilibrium.coords[0] ?? 0;
-            const y = equilibrium.coords[1] ?? 0;
+            const x = (equilibrium.coords[0] ?? 0) - (polarOrigin[0] ?? 0);
+            const y = (equilibrium.coords[1] ?? 0) - (polarOrigin[1] ?? 0);
             const r = Math.hypot(x, y);
             const theta = r < 1e-4 ? 0 : Math.atan2(y, x);
             const [sx, sy] = worldToScreen(liveView, r, theta);
@@ -365,9 +410,11 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
   const viewRef = useRef<ViewRect>(view);
   const curvesRef = useRef(curves.pieces);
   const arrowRef = useRef(arrows);
+  const lyapunovRef = useRef(lyapunovLevels);
   viewRef.current = view;
   curvesRef.current = curves.pieces;
   arrowRef.current = arrows;
+  lyapunovRef.current = lyapunovLevels;
 
   const palette = PALETTE[props.theme];
 

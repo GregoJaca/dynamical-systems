@@ -141,6 +141,12 @@ function Row({
   );
 }
 
+/** In the plane, each branch of a hyperbolic saddle is a separatrix. A sink's stable set is not. */
+function isPlanarSaddleSeparatrix(branch: ManifoldBranch, equilibria: EquilibriumAnalysis[]): boolean {
+  const home = equilibria.find((eq) => eq.id === branch.equilibriumId);
+  return home?.classification2D === 'saddle';
+}
+
 function Block({ children }: { children: ReactNode }) {
   return <section className="viz-block">{children}</section>;
 }
@@ -236,16 +242,24 @@ export function ObjectTree() {
 
       {stableManifolds.length > 0 && (
         <Block>
-          <LayerRow title="Stable and unstable manifolds" on={layers.manifoldsWuWs} dashed={false} color={palette.ws} focus="group:manifolds" onToggle={toggle('manifoldsWuWs')} />
+          <LayerRow
+            title="Stable and unstable manifolds"
+            on={layers.manifoldsWuWs}
+            dashed={false}
+            color={palette.ws}
+            focus="group:manifolds"
+            onToggle={toggle('manifoldsWuWs')}
+          />
           {groupRows(stableManifolds).map((branches) => {
             const first = branches[0]!;
             const home = analysis.equilibria.find((eq) => eq.id === first.equilibriumId);
             const ids = branches.map((branch) => branch.id);
+            const separatrix = isPlanarSaddleSeparatrix(first, analysis.equilibria);
             return (
               <Row
                 key={ids.join(',')}
                 id={`multi:${ids.join(',')}`}
-                label={`${first.kind} of ${home ? where(home) : ''}`}
+                label={`${first.kind}${separatrix ? ' separatrix' : ''} of ${home ? where(home) : ''}`}
                 formula={once(branches.map((branch) => branch.taylorSeriesLatex || branch.reducedDynamicsLatex))}
                 color={first.kind === 'Wu' ? palette.wu : palette.ws}
                 dashed={false}
@@ -384,10 +398,10 @@ export function ObjectTree() {
             title="Lyapunov levels"
             on={layers.lyapunov}
             dashed
-            color={palette.wc}
+            color={palette.nullclineX}
             focus="group:lyapunov"
             onToggle={toggle('lyapunov')}
-            formula={`V = ${analysis.global.lyapunov.vLatex}`}
+            formula={analysis.global.lyapunov.vLatex.trim().startsWith('V') ? analysis.global.lyapunov.vLatex : `V = ${analysis.global.lyapunov.vLatex}`}
           />
         </Block>
       )}

@@ -168,3 +168,31 @@ export function sampleGrid(
   if (finite < (nx * ny) / 4) return null;
   return { grid, xs, ys };
 }
+
+/** Nested level curves of a scalar, used for Lyapunov functions and Hamiltonians. */
+export function levelContours(
+  evaluate: (x: number, y: number) => number,
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+): number[][][] {
+  const sampled = sampleGrid(evaluate, xMin, xMax, yMin, yMax, 48, 48);
+  if (!sampled) return [];
+  const values: number[] = [];
+  for (const row of sampled.grid) {
+    for (const value of row) if (Number.isFinite(value)) values.push(value);
+  }
+  values.sort((a, b) => a - b);
+  if (values.length < 8) return [];
+  const lines: number[][][] = [];
+  const quantiles = [0.22, 0.38, 0.54, 0.7, 0.86];
+  let previous = Number.NaN;
+  for (const quantile of quantiles) {
+    const level = values[Math.min(values.length - 1, Math.floor(quantile * (values.length - 1)))] ?? 0;
+    if (Number.isFinite(previous) && Math.abs(level - previous) <= 1e-9 * (1 + Math.abs(level))) continue;
+    previous = level;
+    lines.push(...contourLines(sampled.grid, sampled.xs, sampled.ys, level));
+  }
+  return lines.filter((path) => path.length > 4);
+}

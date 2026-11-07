@@ -25,15 +25,19 @@ export function foldPolar(path: number[][]): number[][][] {
   return parts;
 }
 
-export function cartesianToPolar(points: number[][]): number[][][] {
+export function cartesianToPolar(points: number[][], origin: number[] = [0, 0]): number[][][] {
   const unwrapped: number[][] = [];
   let previous = 0;
   let accumulated = 0;
   let started = false;
+  const ox = origin[0] ?? 0;
+  const oy = origin[1] ?? 0;
   for (const point of points) {
     if (!finitePair(point)) continue;
-    const r = Math.hypot(point[0], point[1]);
-    const theta = Math.atan2(point[1], point[0]);
+    const x = point[0] - ox;
+    const y = point[1] - oy;
+    const r = Math.hypot(x, y);
+    const theta = Math.atan2(y, x);
     if (!started) {
       accumulated = theta;
       started = true;

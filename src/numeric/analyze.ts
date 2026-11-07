@@ -22,6 +22,8 @@ export function analyzeNumeric(spec: SystemSpec): NumericAnalysis {
     variableLatex: spec.stateVars.map((name) => symbolToLatex(name)),
     periodicVars: spec.stateVars.map((name) => periodicIn(spec.rhsExpressions, name)),
     searchRadius: searchRadius(spec),
+    rhsExpressions: spec.rhsExpressions,
+    stateVars: spec.stateVars,
   });
   const viewport = chooseViewport(spec, equilibria, []);
   const manifolds = spec.dimension === 2 ? computeManifolds(spec, compiled, equilibria, viewport) : [];

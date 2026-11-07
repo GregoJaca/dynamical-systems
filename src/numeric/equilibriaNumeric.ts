@@ -1,5 +1,6 @@
 import type { CompiledSystem, EquilibriumAnalysis, EquilibriumType2D, EquilibriumType3D, StabilityVerdict } from '../core/types';
 import { latexNumber } from './algebra';
+import { attachExactSpectrum } from './exactSpectrum';
 import {
   buildSubspaces,
   decompose,
@@ -22,6 +23,8 @@ export interface EquilibriumSearch {
   variableLatex: string[];
   periodicVars: boolean[];
   searchRadius: number;
+  rhsExpressions?: string[];
+  stateVars?: string[];
 }
 
 const ROOT_TOL = 1e-12;
@@ -88,7 +91,7 @@ function analyzeEquilibrium(
     focus,
   });
   const subspaces = buildSubspaces(coords, spectrum.pairs, search.variableLatex);
-  return {
+  const built: EquilibriumAnalysis = {
     id: `eq-${index}`,
     coords,
     sourceMethod: 'numeric_newton',
@@ -108,6 +111,8 @@ function analyzeEquilibrium(
     hartmanGrobmanApplies: classified.hyperbolic,
     hartmanGrobmanRadius: classified.hyperbolic ? hartmanRadius(compiled, coords, jacobian) : undefined,
   };
+  if (search.rhsExpressions && search.stateVars) attachExactSpectrum(built, search.rhsExpressions, search.stateVars);
+  return built;
 }
 
 interface ClassInput {

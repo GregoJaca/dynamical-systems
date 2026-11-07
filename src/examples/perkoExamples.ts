@@ -469,7 +469,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     stateVars: ['x', 'y'],
     rows: ['x + 3 * y + 1', '-x - y - 1'],
     parameters: {},
-    groundTruth: { equilibria: [[-1, 0]], polarRecommended: false },
+    groundTruth: { equilibria: [[-1, 0]], polarRecommended: true },
   },
   {
     id: 'exam-3',

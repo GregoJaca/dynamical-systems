@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react';
 import type { EquilibriumAnalysis, TraceDetMinimapProps } from '../core/types';
 import { PALETTE, equilibriumColor } from '../core/palette';
+import { coordList } from '../ui/format';
 
 interface PlaneWindow {
   tMin: number;
@@ -89,6 +90,10 @@ function bandPolygon(win: PlaneWindow, side: -1 | 1, mode: 'node' | 'focus'): Ar
   }
   if (lower.length < 2) return null;
   return [...lower, ...upper.reverse()];
+}
+
+function coordText(equilibrium: EquilibriumAnalysis): string {
+  return coordList(equilibrium.coords).replace(/\\frac\{(\d+)\}\{(\d+)\}/g, '$1/$2');
 }
 
 function inside(win: PlaneWindow, tau: number, delta: number): boolean {
@@ -285,25 +290,24 @@ export function TraceDetMinimap(props: TraceDetMinimapProps) {
         const name = (equilibrium.classification2D ?? equilibrium.stability).replaceAll('_', ' ');
         return (
           <g key={equilibrium.id} data-object-id={equilibrium.id} style={{ cursor: 'pointer' }}>
+            <circle cx={x} cy={y} r={selected ? 9 : 7.5} fill={palette.bg} />
             <circle
               cx={x}
               cy={y}
-              r={selected ? 7 : 5}
+              r={selected ? 5.5 : 4.2}
               fill={color}
               stroke={palette.text}
-              strokeWidth={selected ? 1.6 : 0.6}
+              strokeWidth={selected ? 1.6 : 1}
               onClick={() => props.onSelectEquilibrium(equilibrium.id)}
               onPointerEnter={() => setHover(equilibrium.id)}
               onPointerLeave={() => setHover(null)}
             />
+            <text x={x + 10} y={y - 8} fill={palette.text} fontSize="11" fontFamily="Source Sans 3, Segoe UI, sans-serif">
+              {coordText(equilibrium)}
+            </text>
             <title>
-              {name}: τ = {tau.toFixed(3)}, Δ = {det.toFixed(3)}
+              {coordText(equilibrium)} · {name}: τ = {tau.toFixed(3)}, Δ = {det.toFixed(3)}
             </title>
-            {selected && (
-              <text x={x + 8} y={y - 8} fill={palette.text} fontSize="10" fontFamily="Source Sans 3, Segoe UI, sans-serif">
-                {name}
-              </text>
-            )}
           </g>
         );
       })}

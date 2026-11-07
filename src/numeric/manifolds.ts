@@ -36,7 +36,7 @@ export function computeManifolds(
       if (!series) continue;
       const signs: Array<1 | -1> = [1, -1];
       for (const sign of signs) {
-        const points = traceBranch(compiled, eq, tangent.vector, sign, kind, viewport);
+        const points = traceBranch(compiled, eq, tangent.vector, sign, kind, viewport, equilibria);
         const length = polylineLength(points);
         branches.push({
           id: `${eq.id}-${kind}-${sign > 0 ? 'p' : 'm'}`,
@@ -298,10 +298,13 @@ function traceBranch(
   sign: 1 | -1,
   kind: 'Ws' | 'Wu' | 'Wc',
   viewport: ViewportBounds,
+  equilibria: EquilibriumAnalysis[],
 ): number[][] {
   const epsilon = 1e-4;
   const seed = eq.coords.map((value, index) => value + sign * epsilon * (direction[index] ?? 0));
-  const time = kind === 'Ws' ? -40 : 40;
+  const span = Math.max(viewport.xMax - viewport.xMin, viewport.yMax - viewport.yMin, 1);
+  const time = kind === 'Ws' ? -180 : 180;
+  const targets = equilibria.filter((other) => other.id !== eq.id);
   const result = integrateRK45({
     t0: 0,
     t1: time,
@@ -310,13 +313,18 @@ function traceBranch(
     f: compiled.f,
     rtol: 1e-8,
     atol: 1e-10,
-    maxSteps: 4000,
+    maxSteps: 12_000,
     viewport,
-    viewportMargin: 0.05,
-    sampleDistance: 0.02,
+    viewportMargin: 1.2,
+    equilibria: targets.map((other) => ({ id: other.id, coords: other.coords })),
+    equilibriumRadius: Math.max(0.03, span * 0.02),
+    velocityStop: 1e-3,
+    sampleDistance: Math.max(span / 180, 0.015),
     blowUpRadius: 1e4,
   });
   const points = [eq.coords.slice(), ...result.y];
+  const arrival = targets.find((other) => other.id === result.equilibriumId);
+  if (arrival) points.push(arrival.coords.slice());
   return dedupePoints(points);
 }
 
