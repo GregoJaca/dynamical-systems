@@ -310,6 +310,7 @@ export function drawParticles(
       if (!a || !b) continue;
       const [x0, y0] = worldToScreen(view, a[0], a[1]);
       const [x1, y1] = worldToScreen(view, b[0], b[1]);
+      if (Math.hypot(x1 - x0, y1 - y0) > Math.max(view.width, view.height) * 0.35) continue;
       ctx.strokeStyle = withAlpha(particle.color, (dim ? 0.15 : 0.85) * (i / particle.trail.length));
       ctx.lineWidth = 2.2;
       ctx.beginPath();

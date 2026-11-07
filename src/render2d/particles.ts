@@ -85,7 +85,13 @@ export function stepParticles(
     }
     particle.s += speed * step;
     const point = pointAtArc(particle.points, particle.cum, particle.s);
-    particle.trail.push(point);
+    const previous = particle.trail[particle.trail.length - 1];
+    // Open orbits are not loops. Arc length wraps back to the start, which is
+    // often an equilibrium, and connecting those two samples paints a ray.
+    const limit = Math.max(speed * step * 6, worldSpan * 0.04);
+    const jumped = previous != null && Math.hypot(point[0] - previous[0], point[1] - previous[1]) > limit;
+    if (jumped) particle.trail = [point];
+    else particle.trail.push(point);
     if (particle.trail.length > COMET_TRAIL) particle.trail.shift();
   }
 }
