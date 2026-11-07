@@ -175,7 +175,9 @@ def _parse_system(payload: dict[str, Any], warnings: list[str]) -> dict[str, Any
     for raw in rhs_raw:
         expressions.append(sp.sympify(_clean_rhs(raw), locals=local_dict))
     subs = {parameter_symbols[name]: _rationalize(value) for name, value in parameters.items() if name in parameter_symbols}
-    f = sp.Matrix([sp.simplify(expr.subs(subs)) for expr in expressions])
+    f = sp.Matrix(
+        [sp.nsimplify(sp.simplify(expr.subs(subs)), rational=True, tolerance=1e-9) for expr in expressions]
+    )
     time_name = str(payload.get("independentVar") or "t")
     explicit_time = time_name not in names and any(getattr(symbol, "name", "") == time_name for symbol in f.free_symbols)
     return {"f": f, "variables": variables, "names": names, "explicit_time": explicit_time}
@@ -268,6 +270,15 @@ def _greek_latex(text: str) -> str:
     text = re.sub(r"(?<!\\)phi", r"\\phi", text)
     text = re.sub(r"(?<!\\)rho", r"\\rho", text)
     return text
+
+
+def _unit_coefficient(coeff: sp.Expr) -> str:
+    simplified = sp.simplify(coeff)
+    if simplified == 1:
+        return ""
+    if simplified == -1:
+        return "-"
+    return lx(simplified)
 
 
 def _negative(coeff: sp.Expr) -> bool:
@@ -452,7 +463,8 @@ def _realize_solution(
                 shift = base + 2 * sp.pi * choice[cursor]
                 cursor += 1
                 try:
-                    if abs(_to_float(shift)) > 2 * float(sp.pi) + 1e-6:
+                    # Keep one fundamental period: -π, 0, π for the pendulum, not ±2π.
+                    if abs(_to_float(shift)) >= 2 * float(sp.pi) - 1e-6:
                         keep = False
                         break
                 except Exception:
@@ -705,11 +717,23 @@ def _real_jordan_2d(jacobian: sp.Matrix) -> sp.Matrix:
     return sp.diag(sp.simplify(half + offset), sp.simplify(half - offset))
 
 
+def _collapse_angle(expr: sp.Expr, angle: sp.Symbol) -> sp.Expr:
+    """Replace cos^2 = 1-sin^2. This is enough for r' = f(r) and avoids trigsimp."""
+    cosine = sp.cos(angle)
+    collapsed = sp.expand(expr)
+    if not collapsed.has(cosine):
+        return collapsed
+    collapsed = sp.expand(collapsed.subs(cosine**2, 1 - sp.sin(angle) ** 2))
+    if collapsed.has(cosine):
+        collapsed = sp.expand(collapsed.subs(cosine**2, 1 - sp.sin(angle) ** 2))
+    return collapsed
+
+
 def _radial_leading(f: sp.Matrix, x: sp.Symbol, y: sp.Symbol) -> tuple[int, sp.Expr] | None:
     radius = sp.symbols("r", real=True)
     angle = sp.symbols("theta", real=True)
-    radial = ((x * f[0] + y * f[1]) / radius).subs({x: radius * sp.cos(angle), y: radius * sp.sin(angle)})
-    radial = sp.simplify(sp.trigsimp(sp.expand(radial)))
+    radial = sp.expand(((x * f[0] + y * f[1]) / radius).subs({x: radius * sp.cos(angle), y: radius * sp.sin(angle)}))
+    radial = _collapse_angle(radial, angle)
     if not is_zero(sp.diff(radial, angle)):
         return None
     series = sp.series(sp.expand(radial), radius, 0, 7).removeO()
@@ -1103,9 +1127,9 @@ def _classify_center(
     if radial is not None:
         power, coeff = radial
         if power >= 3 and power % 2 == 1 and _negative(coeff):
-            return "weak_stable_focus", "asymptotically_stable", rf"In polar coordinates the radial equation starts with ${lx(coeff)} r^{{{power}}}$, so the focus is weakly attracting.", coeff
+            return "weak_stable_focus", "asymptotically_stable", rf"In polar coordinates the radial equation starts with ${_unit_coefficient(coeff)} r^{{{power}}}$, so the focus is weakly attracting.", coeff
         if power >= 3 and power % 2 == 1 and not _negative(coeff) and not is_zero(coeff):
-            return "weak_unstable_focus", "unstable", rf"In polar coordinates the radial equation starts with ${lx(coeff)} r^{{{power}}}$, so the focus is weakly repelling.", coeff
+            return "weak_unstable_focus", "unstable", rf"In polar coordinates the radial equation starts with ${_unit_coefficient(coeff)} r^{{{power}}}$, so the focus is weakly repelling.", coeff
         if power % 2 == 0:
             return None, "undetermined", "The radial equation has an even leading power, so the equilibrium is not a standard weak focus.", coeff
     l1 = _lyapunov_coefficient(f, variables, origin, modes)
@@ -1191,7 +1215,7 @@ def _focus_normal_form(origin: sp.Matrix, _names: list[str], l1: sp.Expr) -> dic
         "matchCoords": [_to_float(coord) for coord in origin],
         "kind": "Wc",
         "taylorSeriesLatex": r"W^{c}=\mathbb{R}^{2}",
-        "reducedDynamicsLatex": rf"\dot{{r}}={lx(l1)}r^{{3}}+O(r^{{5}})",
+        "reducedDynamicsLatex": rf"\dot{{r}}={_unit_coefficient(l1)}r^{{3}}+O(r^{{5}})",
     }
 
 
@@ -1461,37 +1485,24 @@ def _coordinate_transforms(
     return result or None
 
 
-def _cancelled_velocity(
-    position: sp.Matrix,
-    coords: list[sp.Symbol],
-    field: sp.Matrix,
-    *,
-    trig: bool,
-) -> list[sp.Expr] | None:
-    jacobian = position.jacobian(coords)
-    determinant = sp.factor(jacobian.det())
-    if is_zero(determinant):
-        return None
-    numer = jacobian.adjugate() * field
-    output = []
-    for component in numer:
-        quotient = sp.cancel(sp.together(component / determinant))
-        # trigsimp is the multi-second step. Polynomial fields do not need it.
-        output.append(sp.simplify(sp.trigsimp(quotient) if trig else sp.expand(quotient)))
-    return output
+def _planar_polar_components(
+    f: sp.Matrix, variables: list[sp.Symbol], radius: sp.Symbol, angle: sp.Symbol
+) -> tuple[sp.Expr, sp.Expr]:
+    """r' = (x f1 + y f2)/r and θ' = (x f2 - y f1)/r^2, with cos^2 collapsed."""
+    x, y = variables
+    substitution = {x: radius * sp.cos(angle), y: radius * sp.sin(angle)}
+    radial_num = sp.expand((x * f[0] + y * f[1]).subs(substitution))
+    angular_num = sp.expand((x * f[1] - y * f[0]).subs(substitution))
+    radial = _collapse_angle(sp.cancel(sp.together(radial_num / radius)), angle)
+    angular = _collapse_angle(sp.cancel(sp.together(angular_num / radius**2)), angle)
+    return radial, angular
 
 
 def _polar(f: sp.Matrix, variables: list[sp.Symbol], origin_is_rotation: bool) -> dict[str, Any] | None:
     radius = sp.Dummy("r")
     angle = sp.Dummy("theta")
     x, y = variables
-    position = sp.Matrix([radius * sp.cos(angle), radius * sp.sin(angle)])
-    field = sp.Matrix([f[0].subs({x: position[0], y: position[1]}), f[1].subs({x: position[0], y: position[1]})])
-    uses_trig = any(expr.has(sp.sin, sp.cos, sp.tan) for expr in f)
-    velocity = _cancelled_velocity(position, [radius, angle], field, trig=uses_trig)
-    if velocity is None:
-        return None
-    radial, angular = velocity
+    radial, angular = _planar_polar_components(f, variables, radius, angle)
     rename = [(radius, "r"), (angle, "theta")]
     cart_ops = int(sp.count_ops(f[0]) + sp.count_ops(f[1]))
     polar_ops = int(sp.count_ops(radial) + sp.count_ops(angular))
@@ -1507,7 +1518,10 @@ def _polar(f: sp.Matrix, variables: list[sp.Symbol], origin_is_rotation: bool) -
         reasons.append("The vector field contains x^2+y^2.")
     if origin_is_rotation:
         reasons.append("The origin is a focus, center, or weak focus.")
-    radii, stability = _radial_equilibria(radial, angular, radius, angle)
+    if radial_decoupled:
+        radii, stability = _radial_equilibria(radial, angular, radius, angle)
+    else:
+        radii, stability = [], []
     if any(radius_value > 1e-6 for radius_value in radii):
         reasons.append("A positive root of r' = 0 is a limit cycle when θ' ≠ 0.")
     return {
@@ -1602,23 +1616,29 @@ def _radial_stability(radial: sp.Expr, radius: sp.Symbol, root: float) -> str:
 
 
 def _sample_radial(radial: sp.Expr, radius: sp.Symbol, value: float) -> float:
+    expr = sp.simplify(radial.subs(radius, value))
     try:
-        return _to_float(sp.simplify(radial.subs(radius, value)))
+        return _to_float(expr)
     except Exception:
-        return 0.0
+        if not expr.free_symbols:
+            return 0.0
+        sign = _proven_sign(expr, list(expr.free_symbols))
+        if sign == "negative":
+            return -1.0
+        if sign == "positive":
+            return 1.0
+        try:
+            return _to_float(expr.subs({symbol: 0 for symbol in expr.free_symbols}))
+        except Exception:
+            return 0.0
 
 
 def _cylindrical(f: sp.Matrix, variables: list[sp.Symbol], names: list[str]) -> dict[str, Any] | None:
     radius = sp.Dummy("r")
     angle = sp.Dummy("theta")
     x, y, z = variables
-    position = sp.Matrix([radius * sp.cos(angle), radius * sp.sin(angle), z])
-    field = f.subs({x: position[0], y: position[1]})
-    uses_trig = any(expr.has(sp.sin, sp.cos, sp.tan) for expr in f)
-    velocity = _cancelled_velocity(position, [radius, angle, z], sp.Matrix(field), trig=uses_trig)
-    if velocity is None:
-        return None
-    radial, angular, axial = velocity
+    radial, angular = _planar_polar_components(f, [x, y], radius, angle)
+    axial = _collapse_angle(sp.expand(f[2].subs({x: radius * sp.cos(angle), y: radius * sp.sin(angle)})), angle)
     decoupled = is_zero(sp.diff(radial, angle)) and is_zero(sp.diff(axial, angle))
     reasons = []
     if decoupled:
@@ -1643,15 +1663,26 @@ def _spherical(f: sp.Matrix, variables: list[sp.Symbol]) -> dict[str, Any] | Non
     theta = sp.Dummy("theta")
     phi = sp.Dummy("phi")
     x, y, z = variables
-    position = sp.Matrix(
-        [rho * sp.sin(phi) * sp.cos(theta), rho * sp.sin(phi) * sp.sin(theta), rho * sp.cos(phi)]
+    substitution = {
+        x: rho * sp.sin(phi) * sp.cos(theta),
+        y: rho * sp.sin(phi) * sp.sin(theta),
+        z: rho * sp.cos(phi),
+    }
+    fx, fy, fz = (component.subs(substitution) for component in f)
+    rho_dot = _collapse_angle(
+        sp.expand(sp.sin(phi) * sp.cos(theta) * fx + sp.sin(phi) * sp.sin(theta) * fy + sp.cos(phi) * fz),
+        theta,
     )
-    field = f.subs({x: position[0], y: position[1], z: position[2]})
-    uses_trig = any(expr.has(sp.sin, sp.cos, sp.tan) for expr in f)
-    velocity = _cancelled_velocity(position, [rho, theta, phi], sp.Matrix(field), trig=uses_trig)
-    if velocity is None:
-        return None
-    rho_dot, theta_dot, phi_dot = velocity
+    theta_dot = _collapse_angle(
+        sp.cancel(sp.together(sp.expand(-sp.sin(theta) * fx + sp.cos(theta) * fy) / (rho * sp.sin(phi)))),
+        theta,
+    )
+    phi_dot = _collapse_angle(
+        sp.cancel(
+            sp.together(sp.expand(sp.cos(phi) * sp.cos(theta) * fx + sp.cos(phi) * sp.sin(theta) * fy - sp.sin(phi) * fz) / rho)
+        ),
+        theta,
+    )
     decoupled = is_zero(sp.diff(rho_dot, theta)) and is_zero(sp.diff(rho_dot, phi))
     reasons = []
     if decoupled:

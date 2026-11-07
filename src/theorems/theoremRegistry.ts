@@ -165,7 +165,7 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
         ? 'negative definite, so the equilibrium is asymptotically stable'
         : lyapunov.classification === 'conserved_first_integral'
           ? 'identically zero, so $V$ is a first integral and nearby level sets are invariant'
-          : 'negative semi-definite, so LaSalle\\\'s principle confines the $\\omega$-limit set to $\\{\\dot V = 0\\}$';
+          : "negative semi-definite, so LaSalle's principle confines the $\\omega$-limit set to $\\{\\dot V = 0\\}$";
     results.push(
       theorem(
         'lyapunov-lasalle',
