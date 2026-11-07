@@ -85,6 +85,57 @@ export function generateStreamlines(
   return curves.map((curve, index) => ({ ...curve, id: `stream-${index}` }));
 }
 
+/** Short orbits for 3D and higher, seeded on real eigendirections and a few interior points. */
+export function generateCharacteristicOrbits(
+  compiled: CompiledSystem,
+  viewport: ViewportBounds,
+  equilibria: EquilibriumAnalysis[],
+): StreamlineSegment[] {
+  const dimension = compiled.stateVars.length;
+  if (dimension < 3) return [];
+  const span = Math.max(
+    viewport.xMax - viewport.xMin,
+    viewport.yMax - viewport.yMin,
+    (viewport.zMax ?? 1) - (viewport.zMin ?? -1),
+  );
+  const epsilon = Math.max(0.08, span * 0.035);
+  const seeds: number[][] = [];
+  const push = (point: number[]) => {
+    if (point.length !== dimension || point.some((value) => !Number.isFinite(value))) return;
+    if (seeds.some((other) => Math.hypot(...other.map((value, index) => value - (point[index] ?? 0))) < epsilon * 0.35)) return;
+    seeds.push(point);
+  };
+  for (const equilibrium of equilibria) {
+    for (const vector of equilibrium.eigenvectors) {
+      const norm = Math.hypot(...vector);
+      if (norm < 1e-8) continue;
+      const step = vector.map((value) => (value / norm) * epsilon);
+      push(equilibrium.coords.map((value, index) => value + (step[index] ?? 0)));
+      push(equilibrium.coords.map((value, index) => value - (step[index] ?? 0)));
+    }
+  }
+  const center = [
+    (viewport.xMin + viewport.xMax) / 2,
+    (viewport.yMin + viewport.yMax) / 2,
+    ((viewport.zMin ?? -1) + (viewport.zMax ?? 1)) / 2,
+  ];
+  while (center.length < dimension) center.push(0);
+  push(center.map((value, index) => value + (index === 0 ? epsilon : 0)));
+  push(center.map((value, index) => value - (index === dimension - 1 ? epsilon : 0)));
+
+  const curves: StreamlineSegment[] = [];
+  for (const seed of seeds.slice(0, 16)) {
+    const forward = shoot(compiled, seed, viewport, equilibria, 1);
+    const backward = shoot(compiled, seed, viewport, equilibria, -1);
+    const points = [...backward.points.slice().reverse(), seed, ...forward.points];
+    if (points.length < 4) continue;
+    curves.push(
+      fromPoints(points, compiled, equilibria, 'characteristic_orbit', 'Characteristic orbit', forward.limitId, backward.limitId),
+    );
+  }
+  return curves.map((curve, index) => ({ ...curve, id: `orbit-${index}` }));
+}
+
 function shoot(
   compiled: CompiledSystem,
   y0: number[],

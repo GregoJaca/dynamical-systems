@@ -6,7 +6,7 @@ import { analyzeGlobal, cyclesFromPolar, finalizeGlobal } from './globalAnalysis
 import { computeManifolds } from './manifolds';
 import { computeManifoldSurfaces } from './manifolds3d';
 import { computeNullclines } from './nullclines';
-import { generateStreamlines } from './streamlines';
+import { generateCharacteristicOrbits, generateStreamlines } from './streamlines';
 import { chooseViewport } from './viewport';
 
 /** Full numeric phase-portrait analysis. No Pyodide and no symbolic CAS. */
@@ -29,7 +29,10 @@ export function analyzeNumeric(spec: SystemSpec): NumericAnalysis {
   finalizeGlobal(spec, compiled, bundle, equilibria, []);
   const limitCycles = bundle.polar ? cyclesFromPolar(bundle.polar) : [];
   const framed = limitCycles.length > 0 ? chooseViewport(spec, equilibria, limitCycles) : viewport;
-  const streamlines = spec.dimension === 2 ? generateStreamlines(compiled, framed, equilibria, manifolds) : [];
+  const streamlines =
+    spec.dimension === 2
+      ? generateStreamlines(compiled, framed, equilibria, manifolds)
+      : generateCharacteristicOrbits(compiled, framed, equilibria);
   const nullclines = spec.dimension === 2 ? computeNullclines(compiled, framed) : [];
   const manifoldSurfaces = spec.dimension === 3 ? computeManifoldSurfaces(compiled, equilibria, framed) : [];
   return {

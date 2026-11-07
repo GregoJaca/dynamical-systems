@@ -594,6 +594,9 @@ function jacobianMatrixLatex(rhs: string[], vars: string[]): string {
 }
 
 function expressionToDisplay(expr: string, symbols: string[]): string {
+  if (expr.length > 280) {
+    return expr.replace(/\*/g, ' ').replace(/\^(\d+)/g, '^{$1}').replace(/theta/g, '\\theta');
+  }
   try {
     let output = parse(expr).toTex();
     for (const name of [...symbols].sort((a, b) => b.length - a.length)) {

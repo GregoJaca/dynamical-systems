@@ -77,7 +77,7 @@ export function requestNumeric(
 
   void (async () => {
     try {
-      const analysis = await withTimeout(client.analyzeNumeric(spec), 2000, () => {
+      const analysis = await withTimeout(client.analyzeNumeric(spec), 12_000, () => {
         client.terminate();
         if (numericClient === client) numericClient = null;
       });

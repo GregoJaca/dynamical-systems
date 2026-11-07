@@ -24,6 +24,8 @@ export type Poly = Map<string, number>;
 const ZERO_TOL = 1e-9;
 
 export function trySimplify(expr: string): string {
+  // mathjs simplify is exponential on long trig products. The unsimplified expression stays exact.
+  if (expr.length > 220) return expr;
   try {
     return simplify(expr).toString();
   } catch {
