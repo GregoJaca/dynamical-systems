@@ -312,8 +312,8 @@ function polarSkeleton(rhs: string[], vars: string[]): PolarAnalysis {
   const [x, y] = vars;
   const fx = substituteExpr(rhs[0] ?? '0', { [x!]: '(r * cos(theta))', [y!]: '(r * sin(theta))' });
   const fy = substituteExpr(rhs[1] ?? '0', { [x!]: '(r * cos(theta))', [y!]: '(r * sin(theta))' });
-  const rDot = trySimplify(`(((r * cos(theta)) * (${fx}) + (r * sin(theta)) * (${fy})) / r)`);
-  const thetaDot = trySimplify(`(((r * cos(theta)) * (${fy}) - (r * sin(theta)) * (${fx})) / (r ^ 2))`);
+  const rDot = `(((r * cos(theta)) * (${fx}) + (r * sin(theta)) * (${fy})) / r)`;
+  const thetaDot = `(((r * cos(theta)) * (${fy}) - (r * sin(theta)) * (${fx})) / (r ^ 2))`;
   return {
     isRecommended: false,
     rDotLatex: `\\dot r = ${expressionToDisplay(rDot, ['r', 'theta'])}`,
@@ -329,9 +329,9 @@ function cylindricalSkeleton(rhs: string[], vars: string[]): CylindricalAnalysis
   const [x, y, z] = vars;
   const map = { [x!]: '(r * cos(theta))', [y!]: '(r * sin(theta))', [z!]: 'z' };
   const f = rhs.map((expr) => substituteExpr(expr, map));
-  const rDot = trySimplify(`(((r * cos(theta)) * (${f[0]}) + (r * sin(theta)) * (${f[1]})) / r)`);
-  const thetaDot = trySimplify(`(((r * cos(theta)) * (${f[1]}) - (r * sin(theta)) * (${f[0]})) / (r ^ 2))`);
-  const zDot = trySimplify(f[2] ?? '0');
+  const rDot = `(((r * cos(theta)) * (${f[0]}) + (r * sin(theta)) * (${f[1]})) / r)`;
+  const thetaDot = `(((r * cos(theta)) * (${f[1]}) - (r * sin(theta)) * (${f[0]})) / (r ^ 2))`;
+  const zDot = f[2] ?? '0';
   return {
     isRecommended: false,
     rDotLatex: `\\dot r = ${expressionToDisplay(rDot, ['r', 'theta', 'z'])}`,
@@ -351,11 +351,9 @@ function sphericalSkeleton(rhs: string[], vars: string[]): SphericalAnalysis {
     [z!]: '(rho * cos(theta))',
   };
   const f = rhs.map((expr) => substituteExpr(expr, map));
-  const rhoDot = trySimplify(`(((rho * sin(theta) * cos(phi)) * (${f[0]}) + (rho * sin(theta) * sin(phi)) * (${f[1]}) + (rho * cos(theta)) * (${f[2]})) / rho)`);
-  const thetaDot = trySimplify(
-    `(((cos(theta) * cos(phi)) * (${f[0]}) + (cos(theta) * sin(phi)) * (${f[1]}) + (-sin(theta)) * (${f[2]})) / rho)`,
-  );
-  const phiDot = trySimplify(`(((-sin(phi)) * (${f[0]}) + (cos(phi)) * (${f[1]})) / (rho * sin(theta)))`);
+  const rhoDot = `(((rho * sin(theta) * cos(phi)) * (${f[0]}) + (rho * sin(theta) * sin(phi)) * (${f[1]}) + (rho * cos(theta)) * (${f[2]})) / rho)`;
+  const thetaDot = `(((cos(theta) * cos(phi)) * (${f[0]}) + (cos(theta) * sin(phi)) * (${f[1]}) + (-sin(theta)) * (${f[2]})) / rho)`;
+  const phiDot = `(((-sin(phi)) * (${f[0]}) + (cos(phi)) * (${f[1]})) / (rho * sin(theta)))`;
   return {
     isRecommended: false,
     rhoDotLatex: `\\dot\\rho = ${expressionToDisplay(rhoDot, ['rho', 'theta', 'phi'])}`,
