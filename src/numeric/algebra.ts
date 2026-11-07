@@ -293,6 +293,32 @@ export function isIdenticallyZero(expr: string, vars: string[]): boolean {
   return true;
 }
 
+/**
+ * Sign on the whole plane, accepted only when the expression reduces to a
+ * polynomial after dropping factors that are always positive. A finite sample
+ * is not enough: it can miss a sign change.
+ */
+export function certifiedSign(expr: string, vars: string[]): SignClass {
+  const prepared = stripAlwaysPositive(expr);
+  const poly = toPolynomial(prepared, vars);
+  if (poly) return polynomialSign(poly, vars.length);
+  if (isIdenticallyZero(prepared, vars)) return 'zero';
+  return 'unknown';
+}
+
+function stripAlwaysPositive(expr: string): string {
+  try {
+    const stripped = parse(expr).transform((child) => {
+      const node = asAst(child);
+      if (node.type === 'FunctionNode' && functionName(node) === 'exp') return parse('1');
+      return child;
+    });
+    return stripped.toString();
+  } catch {
+    return expr;
+  }
+}
+
 export function expressionSign(expr: string, vars: string[]): SignClass {
   const poly = toPolynomial(expr, vars);
   if (poly) return polynomialSign(poly, vars.length);

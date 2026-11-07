@@ -33,6 +33,7 @@ const polarRecommended: Record<string, boolean> = {
   'cylindrical-3d': false,
   lorenz: false,
   'coupled-4d': false,
+  'radial-sink-3d': false,
   'exam-2': false,
   'exam-3': false,
   'exam-5': false,

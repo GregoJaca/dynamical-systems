@@ -127,13 +127,13 @@ export function buildWorkedSolutionLatex(analysis: NumericAnalysis, spec?: Worke
     );
   }
   const cylindrical = analysis.coordinateTransforms.cylindrical3D;
-  if (cylindrical) {
+  if (cylindrical?.isRecommended) {
     globalLines.push(
       `Cylindrical form: $${cylindrical.rDotLatex}$, $${cylindrical.thetaDotLatex}$, $${cylindrical.zDotLatex}$.`,
     );
   }
   const spherical = analysis.coordinateTransforms.spherical3D;
-  if (spherical) {
+  if (spherical?.isRecommended) {
     globalLines.push(
       `Spherical form: $${spherical.rhoDotLatex}$, $${spherical.thetaDotLatex}$, $${spherical.phiDotLatex}$.`,
     );

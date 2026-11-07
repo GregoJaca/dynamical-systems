@@ -36,7 +36,7 @@ export function CoordinatesPanel() {
       </div>,
     );
   }
-  if (cylindrical) {
+  if (cylindrical?.isRecommended) {
     blocks.push(
       <div key="cylindrical">
         <Katex tex={shownEquation('\\dot r', cylindrical.rDotLatex)} display />
@@ -45,7 +45,7 @@ export function CoordinatesPanel() {
       </div>,
     );
   }
-  if (spherical) {
+  if (spherical?.isRecommended) {
     blocks.push(
       <div key="spherical">
         <Katex tex={shownEquation('\\dot\\rho', spherical.rhoDotLatex)} display />

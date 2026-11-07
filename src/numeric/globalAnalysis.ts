@@ -14,6 +14,7 @@ import type {
 import { paintSymbolLatex, symbolToLatex } from '../input/parser';
 import {
   differentiate,
+  certifiedSign,
   expressionSign,
   integrateExpr,
   isIdenticallyZero,
@@ -52,7 +53,8 @@ export function analyzeGlobal(spec: SystemSpec, compiled: CompiledSystem): Globa
     xAxis: symmetries.some((item) => item.type === 'time_reversible_x'),
   };
   const bendixson = vars.length === 2 ? bendixsonDulac(rhs, vars) : undefined;
-  const linearSystemExact = spec.isLinear && vars.length === 2 ? linearClosedForm(compiled, spec.independentVar) : undefined;
+  const restsAtOrigin = compiled.f(0, vars.map(() => 0), values).every((value) => Math.abs(value) < 1e-8);
+  const linearSystemExact = spec.isLinear && vars.length === 2 && restsAtOrigin ? linearClosedForm(compiled, spec.independentVar) : undefined;
   const polar = vars.length === 2 ? polarSkeleton(symbolicRhs, vars) : undefined;
   const cylindrical = vars.length === 3 ? cylindricalSkeleton(symbolicRhs, vars) : undefined;
   const spherical = vars.length === 3 ? sphericalSkeleton(symbolicRhs, vars) : undefined;
@@ -94,9 +96,13 @@ export function finalizeGlobal(
     const radial = radialEquilibria(bundle.polar, compiled.parameterValues);
     bundle.polar.radialEquilibriaR = radial.radii;
     bundle.polar.radialStability = radial.stability;
+    for (const symmetry of polarSymmetries(bundle.polar, compiled.parameterValues, spec.stateVars)) {
+      if (bundle.global.symmetries.some((item) => item.type === symmetry.type)) continue;
+      bundle.global.symmetries.push(symmetry);
+    }
   }
   if (bundle.cylindrical) {
-    const free = angularlyFree(bundle.cylindrical.rDotExpr, bundle.cylindrical.zDotExpr, compiled.parameterValues) || mentionsRadial(spec.rhsExpressions, spec.stateVars.slice(0, 2));
+    const free = angularlyFree(bundle.cylindrical.rDotExpr, bundle.cylindrical.zDotExpr, compiled.parameterValues);
     bundle.cylindrical.isRecommended = free;
     bundle.cylindrical.recommendationReason = free ? 'Radial and axial dynamics do not depend on the azimuthal angle.' : undefined;
   }
@@ -209,13 +215,14 @@ function bendixsonDulac(rhs: string[], vars: string[]): BendixsonInfo | undefine
     { latex: 'e^{-y}', expr: `exp(-(${y}))` },
     { latex: 'e^{y}', expr: `exp(${y})` },
     { latex: 'e^{-2x}', expr: `exp(-2*(${x}))` },
-    { latex: '(x^{2}+y^{2})^{-1}', expr: `1 / ((${x})^2 + (${y})^2)` },
   ];
   for (const multiplier of multipliers) {
     const productX = trySimplify(`(${multiplier.expr}) * (${rhs[0]})`);
     const productY = trySimplify(`(${multiplier.expr}) * (${rhs[1]})`);
     const divergence = trySimplify(`(${differentiate(productX, x)}) + (${differentiate(productY, y)})`);
-    const sign = expressionSign(divergence, vars);
+    // 1/(x²+y²) is left out on purpose. It is singular at the origin, so a
+    // sign there does not rule out a cycle that winds around that point.
+    const sign = certifiedSign(divergence, vars);
     if (sign === 'negative' || sign === 'positive' || sign === 'nonpositive' || sign === 'nonnegative') {
       const strict = sign === 'negative' || sign === 'positive';
       return {
@@ -604,6 +611,67 @@ function theorems(spec: SystemSpec, bundle: GlobalBundle, equilibria: Equilibriu
   return items;
 }
 
+/**
+ * Cartesian symmetry tests are algebraic and can miss a symmetry that is
+ * obvious once the field is written in polar coordinates. A closed orbit is
+ * not a closed curve in the (r, θ) plane, so Dulac is not repeated there.
+ */
+function polarSymmetries(polar: PolarAnalysis, parameters: Record<string, number>, vars: string[]): SymmetryInfo[] {
+  const [x, y] = vars;
+  if (!x || !y) return [];
+  const found: SymmetryInfo[] = [];
+  if (angularlyFree(polar.rDotExpr, polar.thetaDotExpr, parameters) && angularlyFree(polar.thetaDotExpr, polar.rDotExpr, parameters)) {
+    found.push({
+      type: 'rotational_SO2',
+      formulaLatex: `(${symbolToLatex(x)}, ${symbolToLatex(y)}) \\mapsto (-${symbolToLatex(y)}, ${symbolToLatex(x)})`,
+      geometricImplication: 'The radial and angular equations ignore θ, so the vector field commutes with rotation.',
+    });
+  }
+  if (symmetricInTheta(polar.rDotExpr, parameters, 'even') && symmetricInTheta(polar.thetaDotExpr, parameters, 'odd')) {
+    found.push({
+      type: 'y_reflection',
+      formulaLatex: `(${symbolToLatex(x)}, ${symbolToLatex(y)}) \\mapsto (${symbolToLatex(x)}, -${symbolToLatex(y)})`,
+      geometricImplication: 'In polar coordinates ṙ is even in θ and θ̇ is odd, so the portrait is symmetric across the horizontal axis.',
+    });
+  }
+  if (verticalMirror(polar.rDotExpr, polar.thetaDotExpr, parameters)) {
+    found.push({
+      type: 'x_reflection',
+      formulaLatex: `(${symbolToLatex(x)}, ${symbolToLatex(y)}) \\mapsto (-${symbolToLatex(x)}, ${symbolToLatex(y)})`,
+      geometricImplication: 'Reflecting θ through the vertical axis preserves ṙ and reverses θ̇, so the portrait is symmetric across that axis.',
+    });
+  }
+  return found;
+}
+
+function symmetricInTheta(expr: string, parameters: Record<string, number>, parity: 'even' | 'odd'): boolean {
+  for (const radius of [0.35, 1.1, 2.4]) {
+    for (const theta of [0.2, 0.9, 1.6, 2.4, -1.2]) {
+      const here = evaluateSafe(expr, { r: radius, theta, ...parameters });
+      const there = evaluateSafe(expr, { r: radius, theta: -theta, ...parameters });
+      const target = parity === 'even' ? there : -there;
+      if (!close(here, target)) return false;
+    }
+  }
+  return true;
+}
+
+function verticalMirror(radial: string, angular: string, parameters: Record<string, number>): boolean {
+  for (const radius of [0.35, 1.1, 2.4]) {
+    for (const theta of [0.2, 0.9, 1.6, 2.4, -1.2]) {
+      const here = { r: radius, theta, ...parameters };
+      const there = { r: radius, theta: Math.PI - theta, ...parameters };
+      if (!close(evaluateSafe(radial, here), evaluateSafe(radial, there))) return false;
+      if (!close(evaluateSafe(angular, here), -evaluateSafe(angular, there))) return false;
+    }
+  }
+  return true;
+}
+
+function close(left: number, right: number): boolean {
+  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 1e-5 * (1 + Math.abs(left));
+}
+
 function angularlyFree(expr: string, _other: string, parameters: Record<string, number>): boolean {
   const values: number[] = [];
   for (const theta of [0, 0.7, 1.4, 2.2, 3]) {
@@ -616,13 +684,6 @@ function angularlyFree(expr: string, _other: string, parameters: Record<string, 
   if (values.some((value) => !Number.isFinite(value))) return false;
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   return values.every((value) => Math.abs(value - mean) < 1e-6 * (1 + Math.abs(mean)));
-}
-
-function mentionsRadial(rhs: string[], vars: string[]): boolean {
-  const text = rhs.join(' ');
-  const [x, y] = vars;
-  if (!x || !y) return false;
-  return text.includes(`${x}^2`) && text.includes(`${y}^2`);
 }
 
 function jacobianMatrixLatex(rhs: string[], vars: string[]): string {
