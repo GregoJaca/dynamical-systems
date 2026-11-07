@@ -365,20 +365,35 @@ function sphericalSkeleton(rhs: string[], vars: string[]): SphericalAnalysis {
   };
 }
 
+function atOrigin(eq: EquilibriumAnalysis): boolean {
+  return eq.coords.length >= 2 && eq.coords.every((value) => Math.abs(value) < 1e-5);
+}
+
+/**
+ * Polar is the useful chart when the whole portrait is organized around the
+ * origin: a center, a focus, or a limit cycle, and no second equilibrium.
+ * A center next to a saddle, or a pendulum already written in (θ, ω), stays
+ * in the cartesian picture.
+ */
 function recommendPolar(
   spec: SystemSpec,
   polar: PolarAnalysis,
   equilibria: EquilibriumAnalysis[],
   limitCycles: LimitCycle[],
 ): { recommended: boolean; reason?: string } {
-  const origin = equilibria.find((eq) => eq.coords.every((value) => Math.abs(value) < 1e-6));
-  const spirals = origin?.classification2D?.includes('focus') || origin?.classification2D?.includes('center');
-  const decoupled = angularlyFree(polar.rDotExpr, polar.rDotExpr, Object.fromEntries(Object.entries(spec.parameters).map(([name, item]) => [name, item.value])));
-  const quadratic = mentionsRadial(spec.rhsExpressions, spec.stateVars);
-  if (decoupled) return { recommended: true, reason: 'The radial equation is independent of θ.' };
-  if (spirals) return { recommended: true, reason: 'The origin is a focus or a center.' };
+  if (spec.dimension !== 2) return { recommended: false };
+  const origin = equilibria.find(atOrigin);
+  if (!origin || equilibria.some((eq) => !atOrigin(eq))) return { recommended: false };
+  const kind = origin.classification2D ?? '';
+  const rotating = kind.includes('focus') || kind.includes('center');
+  const parameters = Object.fromEntries(Object.entries(spec.parameters).map(([name, item]) => [name, item.value]));
+  const radialOnly = angularlyFree(polar.rDotExpr, polar.thetaDotExpr, parameters);
+  if (radialOnly && (rotating || limitCycles.length > 0)) {
+    return { recommended: true, reason: 'The radial equation is independent of θ.' };
+  }
+  if (rotating) return { recommended: true, reason: 'The origin is a focus or a center.' };
   if (limitCycles.length > 0) return { recommended: true, reason: 'A limit cycle encloses the origin.' };
-  if (quadratic) return { recommended: true, reason: 'The vector field depends on x² + y².' };
+  if (radialOnly) return { recommended: true, reason: 'The radial equation is independent of θ.' };
   return { recommended: false };
 }
 

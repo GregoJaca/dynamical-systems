@@ -29,6 +29,8 @@ const FUNCTIONS = ['arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh', 'sqrt',
 
 function symbolWord(name: string): string {
   if (GREEK[name]) return GREEK[name];
+  const indexed = name.match(/^([A-Za-z])(\d+)$/);
+  if (indexed) return `${GREEK[indexed[1]!] ?? indexed[1]}_{${indexed[2]}}`;
   if (/^[A-Za-z]$/.test(name)) return name;
   return `\\mathrm{${name}}`;
 }
@@ -51,4 +53,11 @@ export function rowPreviewLatex(row: string, stateVar: string | undefined, secon
   const variable = symbolWord(stateVar ?? 'x');
   const left = secondOrder ? `\\ddot{${variable}}` : `\\dot{${variable}}`;
   return `${left} = ${asciiMathToLatex(trimmed)}`;
+}
+
+/** One formula, or a braced stack when the system has several equations. */
+export function systemPreviewLatex(rows: string[], stateVars: string[], secondOrder: boolean): string {
+  const lines = rows.map((row, index) => rowPreviewLatex(row, stateVars[index], secondOrder)).filter(Boolean);
+  if (lines.length <= 1) return lines[0] ?? '';
+  return `\\begin{cases} ${lines.join(' \\\\ ')} \\end{cases}`;
 }

@@ -122,7 +122,11 @@ export function compileSystemNumeric(spec: SystemSpec): CompiledSystem {
       row.map((code, columnIndex) => {
         if (!code) return numericPartial(f, t, x, p, rowIndex, columnIndex);
         try {
-          return numericValue(code.evaluate(scope));
+          const value = numericValue(code.evaluate(scope));
+          // A fractional power can make the symbolic derivative undefined at an
+          // equilibrium even though the vector field itself is fine there.
+          if (!Number.isFinite(value)) return numericPartial(f, t, x, p, rowIndex, columnIndex);
+          return value;
         } catch {
           return numericPartial(f, t, x, p, rowIndex, columnIndex);
         }
@@ -388,7 +392,10 @@ export function paintSymbolLatex(tex: string, symbols: string[]): string {
 }
 
 export function symbolToLatex(name: string): string {
-  return GREEK[name] ?? (/^[A-Za-z]$/.test(name) ? name : `\\mathrm{${name}}`);
+  if (GREEK[name]) return GREEK[name];
+  const indexed = name.match(/^([A-Za-z])(\d+)$/);
+  if (indexed) return `${GREEK[indexed[1]!] ?? indexed[1]}_{${indexed[2]}}`;
+  return /^[A-Za-z]$/.test(name) ? name : `\\mathrm{${name}}`;
 }
 
 function resolveStateVars(requested: string[] | undefined, dimension: number): string[] {

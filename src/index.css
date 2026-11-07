@@ -526,6 +526,10 @@ body[data-theme='dark'] .stage {
   padding: 2rem 1.5rem 4rem;
 }
 
+.example-system .math-display {
+  margin: 0.15rem 0 0;
+}
+
 .check-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { PERKO_EXAMPLES } from '../examples/perkoExamples';
 import { useSystemStore } from '../store/useSystemStore';
-import { rowPreviewLatex } from './asciiLatex';
+import { systemPreviewLatex } from './asciiLatex';
 import { Katex } from './Katex';
 
 export function ExampleGallery() {
@@ -47,10 +47,11 @@ export function ExampleGallery() {
                       <span className="text-[11px] uppercase tracking-wide opacity-60">{example.citation}</span>
                     </div>
                     <p className="mt-1 text-sm opacity-75">{example.blurb}</p>
-                    <div className="mt-1 text-sm opacity-90">
-                      {example.rows.map((row, index) => (
-                        <Katex key={`${example.id}-${index}`} tex={rowPreviewLatex(row, example.stateVars[index], example.mode === 'second_order_scalar')} />
-                      ))}
+                    <div className="example-system mt-1 text-sm opacity-90">
+                      <Katex
+                        display
+                        tex={systemPreviewLatex(example.rows, example.stateVars, example.mode === 'second_order_scalar')}
+                      />
                     </div>
                   </button>
                 ))}
