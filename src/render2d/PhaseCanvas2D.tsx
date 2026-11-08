@@ -752,7 +752,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
               const focused = matchesFocus(equilibrium.id, props.hoverObjectId) || props.selectedObjectId === equilibrium.id;
               const dim = props.hoverObjectId != null && !matchesFocus(equilibrium.id, props.hoverObjectId);
               const label = (equilibrium.classification2D ?? equilibrium.stability).replaceAll('_', ' ');
-              const showLabel = focused || props.analysis.equilibria.length <= 8;
+              const showLabel = focused;
               return (
                 <g key={`${view.left}:${equilibrium.id}`} data-object-id={equilibrium.id} opacity={dim ? 0.25 : 1} transform={`translate(${sx} ${sy})`}>
                   {equilibriumGlyph(equilibrium.classification2D, color, focused ? 7 : 5.5)}
