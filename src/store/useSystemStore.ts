@@ -196,9 +196,9 @@ function overlaySnapshotParameters(parsed: Record<string, ParameterSpec>, snapsh
   const parameters = { ...parsed };
   for (const [name, value] of Object.entries(snapshot.parameters)) {
     const existing = parameters[name];
+    if (!existing) continue;
     parameters[name] = {
-      name,
-      latex: existing?.latex || name,
+      ...existing,
       value: value.value,
       min: value.min,
       max: value.max,

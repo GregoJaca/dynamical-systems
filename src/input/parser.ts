@@ -153,8 +153,10 @@ function finishSpec(
   independentVar: string,
   dimension = input.dimension,
 ): SystemSpec {
+  const userLyapunovExpr = canonicalizeOptional(input.userLyapunovExpr, 'Lyapunov function');
   const symbols = new Set<string>();
   for (const expr of rhsExpressions) collectSymbols(parse(expr), symbols);
+  if (userLyapunovExpr) collectSymbols(parse(userLyapunovExpr), symbols);
   const reserved = new Set<string>([...stateVars, independentVar, ...CONSTANTS]);
   const parameters: Record<string, ParameterSpec> = {};
   for (const name of symbols) {
@@ -168,16 +170,12 @@ function finishSpec(
       step: 0.01,
     };
   }
+  // Overrides only restore a slider the user already tuned. A name that the
+  // current equations and Lyapunov function no longer mention is gone.
   if (input.parameterOverrides) {
     for (const [name, patch] of Object.entries(input.parameterOverrides)) {
-      const current = parameters[name] ?? {
-        name,
-        latex: symbolToLatex(name),
-        value: 1,
-        min: -5,
-        max: 5,
-        step: 0.01,
-      };
+      const current = parameters[name];
+      if (!current) continue;
       parameters[name] = {
         ...current,
         ...patch,
@@ -187,7 +185,6 @@ function finishSpec(
     }
   }
   const parameterNames = Object.keys(parameters);
-  const userLyapunovExpr = canonicalizeOptional(input.userLyapunovExpr, 'Lyapunov function');
   const isAutonomous = !rhsExpressions.some((expr) => expressionDependsOn(expr, independentVar));
   const isLinear = rhsExpressions.every((expr) => secondDerivativesVanish(expr, stateVars));
   const latexEquations = stateVars.map(

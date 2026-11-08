@@ -23,6 +23,59 @@ describe('parser', () => {
     expect(value[1]).toBeCloseTo(0, 10);
   });
 
+  it('drops a parameter that the current equations no longer mention', () => {
+    const glued = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['xy', '-y'],
+    });
+    expect(Object.keys(glued.parameters)).toEqual(['xy']);
+
+    const product = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['x*y', '-y'],
+      parameterOverrides: glued.parameters,
+    });
+    expect(product.parameters).toEqual({});
+
+    const tuned = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['mu*x', '-y'],
+      parameterOverrides: {
+        mu: { value: 0.3, min: -1, max: 1, step: 0.05 },
+        xy: { value: 4, min: -5, max: 5, step: 0.01 },
+      },
+    });
+    expect(Object.keys(tuned.parameters)).toEqual(['mu']);
+    expect(tuned.parameters.mu?.value).toBe(0.3);
+    expect(tuned.parameters.mu?.min).toBe(-1);
+  });
+
+  it('treats a Lyapunov symbol as a parameter and drops it when the function is cleared', () => {
+    const withPotential = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['-y', 'x'],
+      userLyapunovExpr: 'a*(x^2 + y^2)/2',
+    });
+    expect(Object.keys(withPotential.parameters)).toEqual(['a']);
+
+    const cleared = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['-y', 'x'],
+      parameterOverrides: withPotential.parameters,
+    });
+    expect(cleared.parameters).toEqual({});
+  });
+
   it('expands a second-order scalar equation using the requested state names', () => {
     const spec = parseSystem({
       mode: 'second_order_scalar',
