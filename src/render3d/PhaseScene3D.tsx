@@ -360,7 +360,7 @@ function FlowLayer(props: SceneContentsProps) {
         id: segment.id,
         points: segment.points,
         color: streamlineColor(segment, palette),
-        width: segment.category === 'separatrix' ? 2.1 : 1.35,
+        width: segment.category === 'separatrix' ? 1.7 : segment.category === 'characteristic_orbit' ? 1.15 : 0.9,
       });
     }
     if (layers.limitCycles) {
@@ -382,7 +382,7 @@ function FlowLayer(props: SceneContentsProps) {
           points={line.points}
           color={line.color}
           width={emphasisWidth(line.id, hoverObjectId, selectedObjectId, line.width)}
-          opacity={emphasisOpacity(line.id, hoverObjectId, selectedObjectId, 0.92)}
+          opacity={emphasisOpacity(line.id, hoverObjectId, selectedObjectId, 0.72)}
           objectId={line.id}
           closed={line.closed}
         />
@@ -670,7 +670,7 @@ function PhaseLine({
   closed?: boolean;
 }) {
   const rendered = useMemo(() => {
-    const clean = decimate(sanitizePoints(points), 720);
+    const clean = decimate(sanitizePoints(points), 2400);
     if (closed && clean.length > 2) {
       const first = clean[0];
       const last = clean[clean.length - 1];

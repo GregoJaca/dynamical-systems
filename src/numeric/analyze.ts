@@ -42,7 +42,7 @@ export function analyzeNumeric(spec: SystemSpec): NumericAnalysis {
     spec.dimension === 2
       ? generateStreamlines(compiled, framed, equilibria, manifolds)
       : generateCharacteristicOrbits(compiled, framed, equilibria);
-  const nullclines = spec.dimension === 2 ? computeNullclines(compiled, framed) : [];
+  const nullclines = spec.dimension === 2 ? computeNullclines(compiled, framed, spec.rhsExpressions) : [];
   const hyperbolicSurfaces = spec.dimension === 3 ? computeManifoldSurfaces(compiled, equilibria, framed) : [];
   const centerSurfaces = spec.dimension === 3 ? attachCenterManifolds3D(spec, equilibria) : [];
   const manifoldSurfaces = [...hyperbolicSurfaces, ...centerSurfaces];

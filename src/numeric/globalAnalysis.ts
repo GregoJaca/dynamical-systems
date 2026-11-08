@@ -569,11 +569,23 @@ export function cyclesFromPolar(polar: PolarAnalysis): LimitCycle[] {
 }
 
 function circle(radius: number): number[][] {
-  const count = 180;
-  return Array.from({ length: count + 1 }, (_, index) => {
-    const angle = (2 * Math.PI * index) / count;
-    return [radius * Math.cos(angle), radius * Math.sin(angle)];
-  });
+  const sagitta = 5e-4 * Math.max(1, radius);
+  const knots = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2, 2 * Math.PI];
+  const points: number[][] = [];
+  const at = (angle: number) => [radius * Math.cos(angle), radius * Math.sin(angle)];
+  for (let knot = 0; knot < knots.length - 1; knot += 1) {
+    const start = knots[knot] ?? 0;
+    const end = knots[knot + 1] ?? start;
+    if (knot === 0) points.push(at(start));
+    let angle = start;
+    while (end - angle > 1e-8) {
+      let step = end - angle;
+      while (step > 1e-4 && radius * (1 - Math.cos(step / 2)) > sagitta) step /= 2;
+      angle = Math.min(end, angle + step);
+      points.push(at(angle));
+    }
+  }
+  return points;
 }
 
 function analyzeLyapunov(spec: SystemSpec, compiled: CompiledSystem, hamiltonian: string | undefined): GlobalPropertiesAnalysis['lyapunov'] {

@@ -145,7 +145,8 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     );
     if (!field) return [];
     const view = props.analysis.viewport;
-    return levelContours(field, view.xMin, view.xMax, view.yMin, view.yMax);
+    const vars = props.spec.stateVars.length >= 2 ? ([props.spec.stateVars[0] ?? 'x', props.spec.stateVars[1] ?? 'y'] as [string, string]) : undefined;
+    return levelContours(field, view.xMin, view.xMax, view.yMin, view.yMax, props.analysis.global.lyapunov?.vExpr, vars);
   }, [
     props.layers.lyapunov,
     props.analysis.global.lyapunov?.classification,

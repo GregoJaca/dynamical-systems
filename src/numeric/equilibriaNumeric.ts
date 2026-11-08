@@ -113,6 +113,7 @@ function analyzeEquilibrium(
     subspaces,
     hartmanGrobmanApplies: classified.hyperbolic,
     hartmanGrobmanRadius: classified.hyperbolic ? hartmanRadius(compiled, coords, jacobian) : undefined,
+    radialCubic: search.dimension === 2 && !hyperbolic && focus != null && Math.abs(focus) > 1e-4 ? focus : undefined,
   };
   if (search.rhsExpressions && search.stateVars) {
     attachExactSpectrum(built, search.rhsExpressions, search.stateVars, compiled.parameterValues);

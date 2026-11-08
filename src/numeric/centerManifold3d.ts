@@ -53,6 +53,7 @@ function oneCenterManifold(spec: SystemSpec, eq: EquilibriumAnalysis): ManifoldS
   if (!graph) return null;
   const reduced = reduceField(jets, graph);
   const quantity = focusQuantity(reduced);
+  if (Number.isFinite(quantity)) eq.radialCubic = quantity;
   if (quantity < -1e-4) {
     eq.stability = 'asymptotically_stable';
     eq.stabilityReasonLatex = 'On the center manifold the transverse eigenvalue is negative and the first focus quantity is negative, so the equilibrium is asymptotically stable.';

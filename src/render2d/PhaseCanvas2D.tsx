@@ -19,7 +19,8 @@ import { objectAnchor, objectFormula, viewportKey } from './formulas';
 import { hitTestPhase } from './hitTest';
 import { linearField, precomputeDroplet, sampleDroplet, synthesizeLinearOrbits, type DropletCache } from './integrate';
 import { spawnParticles, stepParticles, type SimParticle } from './particles';
-import { contourLines, levelContours, sampleGrid } from './contours';
+import { levelContours } from './contours';
+import { projectNullclines } from '../numeric/nullclines';
 import { compileScalarField } from './scalars';
 import { paintPhaseFrame, rasterBasins, type ArrowSample } from './paint';
 
@@ -42,6 +43,8 @@ interface FieldCache {
   arrows: ArrowSample[] | null;
   linearArrowKey: string;
   linearArrows: ArrowSample[] | null;
+  nullKey: string;
+  nullclines: NumericAnalysis['nullclines'] | null;
 }
 
 function parameterRecord(spec: SystemSpec, compiled: CompiledSystem | null): Record<string, number> {
@@ -172,6 +175,8 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     arrows: null,
     linearArrowKey: '',
     linearArrows: null,
+    nullKey: '',
+    nullclines: null,
   });
   const [size, setSize] = useState<Size>({ w: 0, h: 0 });
   const [tooltip, setTooltip] = useState<{ x: number; y: number; html: string } | null>(null);
@@ -310,7 +315,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
           theme: current.theme,
           view: layout.main,
           linearView: layout.linear,
-          analysis: current.analysis,
+          analysis: withProjectedNullclines(current.analysis, cacheRef.current.nullclines),
           layers: current.layers,
           focusId: current.hoverObjectId,
           selectedId: current.selectedObjectId,
@@ -508,14 +513,14 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
           if (now - lastTap < 280) {
             lastTap = 0;
             const layout = currentLayout(current.analysis.viewport);
-            const hit = hitTestPhase(layout.main, pan.sx, pan.sy, current.analysis, current.userOrbits, current.layers);
+            const hit = hitTestPhase(layout.main, pan.sx, pan.sy, withProjectedNullclines(current.analysis, cacheRef.current.nullclines), current.userOrbits, current.layers);
             if (!hit || !current.onDeleteTrajectory(hit)) current.onResetViewport();
           } else {
           lastTap = now;
           const layout = currentLayout(current.analysis.viewport);
           const onLinear = layout.linear != null && pan.sx >= layout.linear.left;
           const view = onLinear && layout.linear ? layout.linear : layout.main;
-          const hit = onLinear ? null : hitTestPhase(view, pan.sx, pan.sy, current.analysis, current.userOrbits, current.layers);
+          const hit = onLinear ? null : hitTestPhase(view, pan.sx, pan.sy, withProjectedNullclines(current.analysis, cacheRef.current.nullclines), current.userOrbits, current.layers);
           if (hit) current.onSelectObject(hit);
           else {
             current.onSelectObject(null);
@@ -667,7 +672,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     }
     const onLinear = layout.linear != null && sx >= layout.linear.left;
     const view = onLinear && layout.linear ? layout.linear : layout.main;
-    const hit = onLinear ? null : hitTestPhase(view, sx, sy, props.analysis, props.userOrbits, props.layers);
+    const hit = onLinear ? null : hitTestPhase(view, sx, sy, withProjectedNullclines(props.analysis, cacheRef.current.nullclines), props.userOrbits, props.layers);
     if (hit !== props.hoverObjectId) props.onHoverObject(hit);
   };
 
@@ -683,7 +688,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     const sy = event.clientY - rect.top;
     const onLinear = layout.linear != null && sx >= layout.linear.left;
     const view = onLinear && layout.linear ? layout.linear : layout.main;
-    const hit = onLinear ? null : hitTestPhase(view, sx, sy, props.analysis, props.userOrbits, props.layers);
+    const hit = onLinear ? null : hitTestPhase(view, sx, sy, withProjectedNullclines(props.analysis, cacheRef.current.nullclines), props.userOrbits, props.layers);
     if (hit) props.onSelectObject(hit);
     else {
       props.onSelectObject(null);
@@ -712,7 +717,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
         const sy = event.clientY - rect.top;
         const onLinear = layout.linear != null && sx >= layout.linear.left;
         const view = onLinear && layout.linear ? layout.linear : layout.main;
-        const hit = onLinear ? null : hitTestPhase(view, sx, sy, props.analysis, props.userOrbits, props.layers);
+        const hit = onLinear ? null : hitTestPhase(view, sx, sy, withProjectedNullclines(props.analysis, cacheRef.current.nullclines), props.userOrbits, props.layers);
         if (!hit || !props.onDeleteTrajectory(hit)) props.onResetViewport();
       }}
     >
@@ -855,7 +860,15 @@ function refreshCaches(
   if (lyapKey && lyapEval && (cache.lyapKey !== lyapKey || cache.lyap == null)) {
     cache.lyapKey = lyapKey;
     cache.lyapAt = now;
-    cache.lyap = levelContours(lyapEval, view.xMin, view.xMax, view.yMin, view.yMax);
+    cache.lyap = levelContours(
+      lyapEval,
+      view.xMin,
+      view.xMax,
+      view.yMin,
+      view.yMax,
+      props.analysis.global.lyapunov?.vExpr,
+      props.spec.stateVars.length >= 2 ? [props.spec.stateVars[0] ?? 'x', props.spec.stateVars[1] ?? 'y'] : undefined,
+    );
   }
   if (!lyapKey) {
     cache.lyap = null;
@@ -865,7 +878,8 @@ function refreshCaches(
   if (hamKey && hamEval && (cache.hamKey !== hamKey || cache.ham == null)) {
     cache.hamKey = hamKey;
     cache.hamAt = now;
-    cache.ham = hamiltonianContours(hamEval, view);
+    const vars = props.spec.stateVars.length >= 2 ? ([props.spec.stateVars[0] ?? 'x', props.spec.stateVars[1] ?? 'y'] as [string, string]) : undefined;
+    cache.ham = hamiltonianContours(hamEval, view, props.analysis.global.hamiltonianExpr, vars);
   }
   if (!hamKey) {
     cache.ham = null;
@@ -904,21 +918,18 @@ function refreshCaches(
     cache.linearArrows = null;
     cache.linearArrowKey = '';
   }
+  const nullKey = `${viewportKey(props.analysis.viewport)}:${props.analysis.revision}:${props.analysis.nullclines.map((curve) => curve.expression ?? '').join('|')}`;
+  if (cache.nullKey !== nullKey || cache.nullclines == null) {
+    cache.nullKey = nullKey;
+    cache.nullclines = projectNullclines(props.analysis.nullclines, props.analysis.viewport, props.compiled?.parameterValues ?? {});
+  }
 }
 
-function hamiltonianContours(evaluate: (x: number, y: number) => number, view: ViewRect): number[][][] {
-  const sampled = sampleGrid(evaluate, view.xMin, view.xMax, view.yMin, view.yMax, 28, 28);
-  if (!sampled) return [];
-  const values: number[] = [];
-  for (const row of sampled.grid) {
-    for (const value of row) if (Number.isFinite(value)) values.push(value);
-  }
-  values.sort((a, b) => a - b);
-  if (values.length < 8) return [];
-  const lines: number[][][] = [];
-  for (const quantile of [0.18, 0.34, 0.5, 0.66, 0.82]) {
-    const level = values[Math.min(values.length - 1, Math.floor(quantile * (values.length - 1)))] ?? 0;
-    lines.push(...contourLines(sampled.grid, sampled.xs, sampled.ys, level));
-  }
-  return lines;
+function withProjectedNullclines(analysis: NumericAnalysis, nullclines: NumericAnalysis['nullclines'] | null): NumericAnalysis {
+  if (!nullclines) return analysis;
+  return { ...analysis, nullclines };
+}
+
+function hamiltonianContours(evaluate: (x: number, y: number) => number, view: ViewRect, expression?: string, variables?: [string, string]): number[][][] {
+  return levelContours(evaluate, view.xMin, view.xMax, view.yMin, view.yMax, expression, variables);
 }

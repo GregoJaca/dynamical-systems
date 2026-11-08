@@ -143,29 +143,54 @@ export function strokeWorldPath(
   width: number,
   alpha: number,
   dashed = false,
+  sinks?: number[][],
 ): void {
   ctx.save();
   clipView(ctx, view);
-  ctx.globalAlpha = alpha;
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.setLineDash(dashed ? [6, 5] : []);
-  ctx.beginPath();
-  let started = false;
-  for (const point of points) {
-    if (!finitePair(point)) {
-      started = false;
-      continue;
+  const fadeRadius = sinks && sinks.length > 0 ? Math.max(view.xMax - view.xMin, view.yMax - view.yMin) * 0.16 : 0;
+  if (!(fadeRadius > 0) || !sinks) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    let started = false;
+    for (const point of points) {
+      if (!finitePair(point)) {
+        started = false;
+        continue;
+      }
+      const [sx, sy] = worldToScreen(view, point[0], point[1]);
+      if (!started) {
+        ctx.moveTo(sx, sy);
+        started = true;
+      } else ctx.lineTo(sx, sy);
     }
-    const [sx, sy] = worldToScreen(view, point[0], point[1]);
-    if (!started) {
-      ctx.moveTo(sx, sy);
-      started = true;
-    } else ctx.lineTo(sx, sy);
+    ctx.stroke();
+    ctx.restore();
+    return;
   }
-  ctx.stroke();
+  for (let index = 1; index < points.length; index += 1) {
+    const a = points[index - 1];
+    const b = points[index];
+    if (!finitePair(a) || !finitePair(b)) continue;
+    const mx = ((a[0] ?? 0) + (b[0] ?? 0)) / 2;
+    const my = ((a[1] ?? 0) + (b[1] ?? 0)) / 2;
+    let factor = 1;
+    for (const sink of sinks) {
+      const gap = Math.hypot(mx - (sink[0] ?? 0), my - (sink[1] ?? 0));
+      if (gap < fadeRadius) factor = Math.min(factor, 0.28 + 0.72 * (gap / fadeRadius));
+    }
+    const [x0, y0] = worldToScreen(view, a[0], a[1]);
+    const [x1, y1] = worldToScreen(view, b[0], b[1]);
+    ctx.globalAlpha = alpha * factor;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -338,12 +363,12 @@ export function drawDisk(
 
 export function curveAlpha(id: string, focusId: string | null, base: number): number {
   if (!focusId || matchesFocus(id, focusId)) return base;
-  return Math.min(base, 0.2);
+  return Math.min(base * 0.34, 0.22);
 }
 
 export function curveWidth(id: string, focusId: string | null, selectedId: string | null, base: number): number {
-  if (matchesFocus(id, focusId)) return base + 1.8;
-  if (selectedId === id) return base + 0.9;
+  if (matchesFocus(id, focusId)) return base + 0.45;
+  if (selectedId === id) return base + 0.3;
   return base;
 }
 
@@ -434,18 +459,22 @@ export function paintPhaseFrame(frame: PhaseFrame): void {
       }
     }
     if (frame.layers.vectorField && frame.arrows) drawVectorArrows(ctx, view, frame.arrows, palette.muted);
+    const sinks = analysis.equilibria.map((eq) => eq.coords);
     if (frame.layers.streamlines) {
       for (const segment of analysis.streamlines) {
         if (segment.category === 'separatrix') continue;
+        const characteristic = segment.category === 'characteristic_orbit';
         strokeWorldPath(
           ctx,
           view,
           segment.points,
           palette.streamline,
-          curveWidth(segment.id, frame.focusId, frame.selectedId, segment.category === 'characteristic_orbit' ? 1.45 : 1.15),
-          curveAlpha(segment.id, frame.focusId, 1),
+          curveWidth(segment.id, frame.focusId, frame.selectedId, characteristic ? 1.15 : 0.9),
+          curveAlpha(segment.id, frame.focusId, characteristic ? 0.82 : 0.55),
+          false,
+          sinks,
         );
-        strokeArrow(ctx, view, segment.points, palette.streamline, curveAlpha(segment.id, frame.focusId, 0.9));
+        strokeArrow(ctx, view, segment.points, palette.streamline, curveAlpha(segment.id, frame.focusId, characteristic ? 0.85 : 0.6));
       }
     }
     if (frame.layers.nullclines) {
@@ -472,7 +501,7 @@ export function paintPhaseFrame(frame: PhaseFrame): void {
           view,
           segment.points,
           palette.separatrix,
-          curveWidth(segment.id, frame.focusId, frame.selectedId, 2.1),
+          curveWidth(segment.id, frame.focusId, frame.selectedId, 1.7),
           curveAlpha(segment.id, frame.focusId, 0.95),
         );
         strokeArrow(ctx, view, segment.points, palette.separatrix, curveAlpha(segment.id, frame.focusId, 1));
@@ -488,7 +517,7 @@ export function paintPhaseFrame(frame: PhaseFrame): void {
           view,
           manifold.points,
           color,
-          curveWidth(manifold.id, frame.focusId, frame.selectedId, 2.15),
+          curveWidth(manifold.id, frame.focusId, frame.selectedId, 1.65),
           curveAlpha(manifold.id, frame.focusId, 0.95),
         );
       }

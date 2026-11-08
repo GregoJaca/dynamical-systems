@@ -5,6 +5,7 @@ import type {
   StreamlineSegment,
   ViewportBounds,
 } from '../core/types';
+import { completeArrival, flowOrbit } from '../numeric/localOrbit';
 import { integrateRK45 } from '../numeric/rk45';
 
 function coordText(coords: number[]): string {
@@ -14,13 +15,6 @@ function coordText(coords: number[]): string {
     return String(Number(value.toPrecision(3)));
   };
   return `(${coords.map(part).join(', ')})`;
-}
-
-function limitId(result: Rk45Result, direction: 'forward' | 'backward'): string {
-  if (result.equilibriumId) return result.equilibriumId;
-  if (result.status === 'periodicOrbitDetected') return 'limit_cycle';
-  if (result.status === 'blowUp' || result.status === 'viewportExit') return 'infinity';
-  return direction === 'forward' ? 'unresolved' : 'unresolved';
 }
 
 function joinBranches(backward: number[][], forward: number[][]): number[][] {
@@ -73,19 +67,19 @@ export function traceUserOrbit(
   compiled: CompiledSystem,
   point: number[],
   viewport: ViewportBounds,
-  equilibria: Array<{ id: string; coords: number[] }>,
+  equilibria: EquilibriumAnalysis[],
   id: string,
 ): StreamlineSegment | null {
-  const forward = integrateSafe(compiled.f, compiled.parameterValues, point, 18, viewport, equilibria);
-  const backward = integrateSafe(compiled.f, compiled.parameterValues, point, -18, viewport, equilibria);
-  const points = joinBranches(backward?.y ?? [], forward?.y ?? []);
+  const forward = flowOrbit(compiled, point, viewport, equilibria, 1, 100);
+  const backward = flowOrbit(compiled, point, viewport, equilibria, -1, 70);
+  const points = joinBranches(backward.points, [point, ...forward.points]);
   if (points.length < 2) return null;
   return {
     id,
     points,
     velocities: velocities(compiled.f, points, compiled.parameterValues),
-    forwardLimitId: forward ? limitId(forward, 'forward') : 'unresolved',
-    backwardLimitId: backward ? limitId(backward, 'backward') : 'unresolved',
+    forwardLimitId: forward.limitId,
+    backwardLimitId: backward.limitId,
     category: 'user_traced',
     reasonTag: 'Clicked orbit',
     formulaOrDescriptionLatex: '\\text{Orbit through the chosen initial condition}',
@@ -137,11 +131,15 @@ export function computeLinearStreamlines(
   const field = linearField(eq);
   const params = compiled.parameterValues;
   const segments: StreamlineSegment[] = [];
+  const span = Math.max(viewport.xMax - viewport.xMin, viewport.yMax - viewport.yMin, 1);
+  const linearCompiled: CompiledSystem = { ...compiled, f: field };
   seedsAround(eq).forEach((seed, index) => {
     const forward = integrateSafe(field, params, seed, 3.5, viewport, []);
     const backward = integrateSafe(field, params, seed, -3.5, viewport, []);
-    const points = joinBranches(backward?.y ?? [], forward?.y ?? []);
+    let points = joinBranches(backward?.y ?? [], forward?.y ?? []);
     if (points.length < 2) return;
+    points = completeArrival(points, 'end', linearCompiled, [eq], span / 160, 1).points;
+    points = completeArrival(points, 'start', linearCompiled, [eq], span / 160, -1).points;
     segments.push({
       id: `lin-${eq.id}-${index}`,
       points,

@@ -9,6 +9,7 @@ import type { CompiledSystem, EquilibriumAnalysis, ManifoldBranch, SystemSpec, V
 import { latexNumber, mathLiteral, seriesMonomialLatex, snapNice, substituteExpr, substituteNumbers } from './algebra';
 import { symbolToLatex } from '../input/parser';
 import { invert2 } from './linearAlgebra';
+import { completeArrival, equilibriumStops } from './localOrbit';
 import { integrateRK45 } from './rk45';
 
 const SERIES_DEGREE = 5;
@@ -36,10 +37,21 @@ export function computeManifolds(
         /* A hyperbolic direction paired only with a center is still a valid graph. */
       }
       const series = manifoldSeries(spec, eq, tangent.vector, tangent.re, transverse.vector, transverse.re);
-      if (!series) continue;
+      if (!series && kind === 'Wc') continue;
       const signs: Array<1 | -1> = [1, -1];
       for (const sign of signs) {
-        const points = traceBranch(compiled, eq, tangent.vector, sign, kind, viewport, equilibria, level);
+        const points = traceBranch(
+          compiled,
+          eq,
+          tangent.vector,
+          transverse.vector,
+          series?.coefficients ?? [0, 0],
+          sign,
+          kind,
+          viewport,
+          equilibria,
+          level,
+        );
         const length = polylineLength(points);
         branches.push({
           id: `${eq.id}-${kind}-${sign > 0 ? 'p' : 'm'}`,
@@ -48,11 +60,11 @@ export function computeManifolds(
           sign,
           points,
           arclength: length,
-          taylorSeriesLatex: series.taylorLatex,
-          reducedDynamicsLatex: kind === 'Wc' ? series.reducedLatex : undefined,
+          taylorSeriesLatex: series?.taylorLatex ?? '',
+          reducedDynamicsLatex: kind === 'Wc' ? series?.reducedLatex : undefined,
         });
       }
-      if (kind === 'Wc' && series.reduced) {
+      if (kind === 'Wc' && series?.reduced) {
         applyCenterStability(eq, series.reduced, transverse.re);
       }
     }
@@ -87,6 +99,8 @@ interface SeriesResult {
   taylorLatex: string;
   reducedLatex?: string;
   reduced?: { degree: number; coeff: number };
+  /** Graph v = Σ h_k u^k in the eigenbasis (tangent, transverse). */
+  coefficients: number[];
 }
 
 function manifoldSeries(
@@ -146,7 +160,7 @@ function manifoldSeries(
   const topDegree = cleanedReduced.reduce((last, value, index) => (Math.abs(value) > 1e-10 ? index : last), 0);
   const remainder = topDegree >= SERIES_DEGREE ? ` + O(u^{${SERIES_DEGREE + 1}})` : '';
   const reducedLatex = reduced ? `\\dot{u} = ${seriesMonomialLatex(cleanedReduced, 'u')}${remainder}` : undefined;
-  return { taylorLatex, reducedLatex, reduced };
+  return { taylorLatex, reducedLatex, reduced, coefficients: h.slice() };
 }
 
 function taylorCoefficients(expr: string): number[][] | null {
@@ -231,12 +245,32 @@ function graphLatex(vars: string[], coords: number[], tangent: number[], transve
   const inverse = revertSeries(parameter, max);
   const output = addSeries(linearSeries(cross, max + 1), scaleSeries(h, crossNormal));
   const composed = inverse ? displaySeries(composeSeries(output, inverse, max)) : null;
-  if (!composed) return `v = ${seriesMonomialLatex(h, 'u')}`;
+  if (!composed) return `v = ${formatSeries(h, 'u')}`;
   const shift = (symbol: string, origin: number) => (Math.abs(origin) < 1e-6 ? symbol : `\\left(${symbol}-${latexNumber(origin)}\\right)`);
   const independent = overX ? shift(xLatex, coords[0] ?? 0) : shift(yLatex, coords[1] ?? 0);
   const dependent = overX ? yLatex : xLatex;
   const constant = overX ? (coords[1] ?? 0) : (coords[0] ?? 0);
-  return `${dependent} = ${withConstant(constant, seriesMonomialLatex(composed, independent))}`;
+  return `${dependent} = ${withConstant(constant, formatSeries(composed, independent))}`;
+}
+
+/** Keep the eigendirection and every later coefficient that is an exact radical or rational. A float tail is the truncation error, not a new exact term. */
+function formatSeries(coeffs: number[], variable: string): string {
+  const shown = coeffs.slice();
+  let order: number | null = null;
+  for (let power = 2; power < shown.length; power += 1) {
+    const coeff = shown[power] ?? 0;
+    if (Math.abs(coeff) < 1e-8) continue;
+    if (latexNumber(Math.abs(coeff)).includes('.')) {
+      for (let index = power; index < shown.length; index += 1) shown[index] = 0;
+      order = power;
+      break;
+    }
+  }
+  const polynomial = seriesMonomialLatex(shown, variable);
+  if (order === null) return polynomial;
+  const remainder = `O\\left(${variable}^{${order}}\\right)`;
+  if (polynomial === '0') return remainder;
+  return `${polynomial}+${remainder}`;
 }
 
 function displaySeries(series: number[]): number[] {
@@ -333,41 +367,120 @@ function applyCenterStability(eq: EquilibriumAnalysis, reduced: { degree: number
 function traceBranch(
   compiled: CompiledSystem,
   eq: EquilibriumAnalysis,
-  direction: number[],
+  tangent: number[],
+  transverse: number[],
+  graph: number[],
   sign: 1 | -1,
   kind: 'Ws' | 'Wu' | 'Wc',
   viewport: ViewportBounds,
   equilibria: EquilibriumAnalysis[],
   project?: (y: number[]) => void,
 ): number[][] {
-  const epsilon = 1e-4;
-  const seed = eq.coords.map((value, index) => value + sign * epsilon * (direction[index] ?? 0));
-  if (project) project(seed);
   const span = Math.max(viewport.xMax - viewport.xMin, viewport.yMax - viewport.yMin, 1);
-  const time = kind === 'Ws' ? -220 : 220;
+  const local = seriesArc(compiled, eq, tangent, transverse, graph, sign, viewport, project);
+  const seed = local[local.length - 1] ?? eq.coords.slice();
+  const atBoundary = !insideViewport(seed, viewport, 0.03);
+  if (atBoundary || local.length < 2) return dedupePoints(local);
+  const velocity = compiled.f(0, seed, compiled.parameterValues);
+  const radial = seed.map((value, index) => value - (eq.coords[index] ?? 0));
+  let outward = 0;
+  for (let index = 0; index < radial.length; index += 1) outward += (velocity[index] ?? 0) * (radial[index] ?? 0);
+  const timeSign: 1 | -1 = outward >= 0 ? 1 : -1;
+  const departed = Math.hypot(...radial);
   const result = integrateRK45({
     t0: 0,
-    t1: time,
+    t1: timeSign * (kind === 'Wc' ? 80 : 160),
     y0: seed,
     params: compiled.parameterValues,
     f: compiled.f,
-    rtol: 1e-8,
-    atol: 1e-10,
-    maxSteps: 12_000,
+    rtol: 1e-7,
+    atol: 1e-9,
+    maxSteps: 6_000,
     viewport,
-    viewportMargin: 1.2,
-    equilibria: equilibria.map((other) => ({ id: other.id, coords: other.coords })),
-    equilibriumRadius: Math.max(0.03, span * 0.02),
-    velocityStop: 1e-3,
-    departDistance: 0.2,
+    viewportMargin: 0.05,
+    equilibria: equilibriumStops(equilibria),
+    equilibriumRadius: Math.min(0.05, Math.max(span / 400, 1e-4)),
+    velocityStop: 1e-8,
+    departDistance: Math.max(departed * 1.4, span * 0.012),
     project,
-    sampleDistance: Math.max(span / 180, 0.015),
+    sampleDistance: Math.max(span / 480, 0.006),
     blowUpRadius: 1e4,
   });
-  const points = [eq.coords.slice(), ...result.y];
-  const arrival = equilibria.find((other) => other.id === result.equilibriumId);
-  if (arrival) points.push(arrival.coords.slice());
-  return dedupePoints(points);
+  let points = dedupePoints([...local, ...result.y.slice(1)]);
+  const extended = completeArrival(points, 'end', compiled, equilibria, span / 160, timeSign);
+  return dedupePoints(extended.points);
+}
+
+function seriesArc(
+  compiled: CompiledSystem,
+  eq: EquilibriumAnalysis,
+  tangent: number[],
+  transverse: number[],
+  graph: number[],
+  sign: 1 | -1,
+  viewport: ViewportBounds,
+  project?: (y: number[]) => void,
+): number[][] {
+  const span = Math.max(viewport.xMax - viewport.xMin, viewport.yMax - viewport.yMin, 1);
+  const step = Math.min(span / 900, 0.012) * sign;
+  const points = [eq.coords.slice()];
+  let u = 0;
+  let reach = 0;
+  for (let guard = 0; guard < 1600; guard += 1) {
+    const nextU = u + step;
+    if (Math.abs(nextU) > span * 0.95) break;
+    const point = embed(eq.coords, tangent, transverse, graph, nextU);
+    if (project) project(point);
+    if (!insideViewport(point, viewport, 0.01)) break;
+    const speed = compiled.f(0, point, compiled.parameterValues);
+    if (Math.hypot(...speed) < 1e-7 && Math.abs(nextU) > 1e-3) break;
+    const gap = Math.hypot(...point.map((value, index) => value - (eq.coords[index] ?? 0)));
+    if (gap + 1e-5 < reach && Math.abs(nextU) > span * 0.008) break;
+    const slope = embedTangent(tangent, transverse, graph, nextU);
+    if (Math.abs(nextU) > span * 0.015 && angleBetween(speed, slope) > 0.03) break;
+    points.push(point);
+    u = nextU;
+    reach = Math.max(reach, gap);
+  }
+  return points;
+}
+
+function embed(origin: number[], tangent: number[], transverse: number[], graph: number[], u: number): number[] {
+  const v = horner(graph, u);
+  return origin.map((value, index) => value + u * (tangent[index] ?? 0) + v * (transverse[index] ?? 0));
+}
+
+function embedTangent(tangent: number[], transverse: number[], graph: number[], u: number): number[] {
+  const slope = horner(derivativeCoefficients(graph), u);
+  return tangent.map((value, index) => value + slope * (transverse[index] ?? 0));
+}
+
+function horner(coefficients: number[], u: number): number {
+  let value = 0;
+  for (let index = coefficients.length - 1; index >= 0; index -= 1) value = value * u + (coefficients[index] ?? 0);
+  return value;
+}
+
+function derivativeCoefficients(coefficients: number[]): number[] {
+  return coefficients.slice(1).map((value, index) => value * (index + 1));
+}
+
+function angleBetween(left: number[], right: number[]): number {
+  const leftNorm = Math.hypot(...left);
+  const rightNorm = Math.hypot(...right);
+  if (leftNorm < 1e-10 || rightNorm < 1e-10) return 0;
+  let dot = 0;
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) dot += (left[index] ?? 0) * (right[index] ?? 0);
+  const cosine = Math.min(1, Math.max(-1, dot / (leftNorm * rightNorm)));
+  return Math.acos(Math.abs(cosine));
+}
+
+function insideViewport(point: number[], viewport: ViewportBounds, margin: number): boolean {
+  const xPad = (viewport.xMax - viewport.xMin) * margin;
+  const yPad = (viewport.yMax - viewport.yMin) * margin;
+  const x = point[0] ?? 0;
+  const y = point[1] ?? 0;
+  return x >= viewport.xMin - xPad && x <= viewport.xMax + xPad && y >= viewport.yMin - yPad && y <= viewport.yMax + yPad;
 }
 
 /** Newton correction onto the Hamiltonian level through an equilibrium. A saddle separatrix stays on that level; without it the numerical branch peels into a nearby center. */

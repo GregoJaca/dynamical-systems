@@ -1,5 +1,5 @@
 import type { CompiledSystem, EquilibriumAnalysis, ManifoldBranch, StreamlineSegment, ViewportBounds } from '../core/types';
-import { integrateRK45 } from './rk45';
+import { flowOrbit } from './localOrbit';
 
 /**
  * Jobard–Lefer seeding: rings around every equilibrium, then a separation-distance
@@ -62,8 +62,8 @@ export function generateStreamlines(
       continue;
     }
     if (!inside(seed.x, seed.y, viewport)) continue;
-    const forward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, 1);
-    const backward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, -1);
+    const forward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, 1, true);
+    const backward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, -1, true);
     const points = [...backward.points.slice().reverse(), [seed.x, seed.y], ...forward.points];
     if (points.length < 4) continue;
     const segment = fromPoints(
@@ -92,8 +92,8 @@ export function generateStreamlines(
     guard += 1;
     const seed = later.shift()!;
     if (!inside(seed.x, seed.y, viewport) || grid.blocked(seed.x, seed.y)) continue;
-    const forward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, 1);
-    const backward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, -1);
+    const forward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, 1, false);
+    const backward = shoot(compiled, [seed.x, seed.y], viewport, equilibria, -1, false);
     const points = [...backward.points.slice().reverse(), [seed.x, seed.y], ...forward.points];
     if (points.length < 4) continue;
     const segment = fromPoints(points, compiled, equilibria, 'background_streamline', seed.reason, forward.limitId, backward.limitId);
@@ -147,8 +147,8 @@ export function generateCharacteristicOrbits(
 
   const curves: StreamlineSegment[] = [];
   for (const seed of seeds.slice(0, 16)) {
-    const forward = shoot(compiled, seed, viewport, equilibria, 1);
-    const backward = shoot(compiled, seed, viewport, equilibria, -1);
+    const forward = shoot(compiled, seed, viewport, equilibria, 1, true);
+    const backward = shoot(compiled, seed, viewport, equilibria, -1, true);
     const points = [...backward.points.slice().reverse(), seed, ...forward.points];
     if (points.length < 4) continue;
     curves.push(
@@ -164,23 +164,9 @@ function shoot(
   viewport: ViewportBounds,
   equilibria: EquilibriumAnalysis[],
   direction: 1 | -1,
+  careful: boolean,
 ): { points: number[][]; limitId: string } {
-  const result = integrateRK45({
-    t0: 0,
-    t1: direction * 30,
-    y0,
-    params: compiled.parameterValues,
-    f: compiled.f,
-    rtol: 1e-4,
-    atol: 1e-6,
-    maxSteps: 280,
-    viewport,
-    viewportMargin: 0.02,
-    equilibria: equilibria.map((eq) => ({ id: eq.id, coords: eq.coords })),
-    sampleDistance: (viewport.xMax - viewport.xMin) / 80,
-  });
-  const limitId = result.equilibriumId ?? (result.status === 'viewportExit' || result.status === 'blowUp' ? 'infinity' : result.status === 'periodicOrbitDetected' ? 'limit_cycle_0' : 'unresolved');
-  return { points: result.y.slice(1), limitId };
+  return flowOrbit(compiled, y0, viewport, equilibria, direction, careful ? 90 : 26);
 }
 
 function fromPoints(

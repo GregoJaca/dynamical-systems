@@ -155,14 +155,27 @@ export function integrateRK45(options: Rk45Options): Rk45Result {
       break;
     }
     if (departed && options.equilibria && options.equilibria.length > 0) {
-      const speed = norm(yp);
-      if (speed < velocityStop) {
-        let nearest: { id: string; dist: number } | null = null;
-        for (const eq of options.equilibria) {
-          const dist = distance(y, eq.coords);
-          if (!nearest || dist < nearest.dist) nearest = { id: eq.id, dist };
+      let nearest: { id: string; dist: number; toward: number; role: 'sink' | 'saddle' } | null = null;
+      for (const eq of options.equilibria) {
+        const dist = distance(y, eq.coords);
+        if (!nearest || dist < nearest.dist) {
+          let toward = 0;
+          for (let i = 0; i < n; i += 1) toward += (yp[i] ?? 0) * ((eq.coords[i] ?? 0) - (y[i] ?? 0));
+          nearest = { id: eq.id, dist, toward, role: eq.role ?? 'sink' };
         }
-        if (nearest && nearest.dist < equilibriumRadius) {
+      }
+      if (nearest && nearest.dist < equilibriumRadius) {
+        const approaching = nearest.toward * direction > 0;
+        const speed = norm(yp);
+        const cosine = nearest.toward / (speed * nearest.dist + 1e-18);
+        const essentiallyThere = nearest.dist < Math.min(equilibriumRadius * 0.2, 1e-3) || speed < velocityStop * 0.05;
+        // A saddle fly-by can point vaguely inward for one step. Require the velocity to
+        // actually line up with the equilibrium, or the state to have already settled.
+        const saddleArrival =
+          nearest.role === 'saddle' &&
+          ((approaching && cosine > 0.75) || (approaching && speed < Math.max(velocityStop * 20, nearest.dist * 0.25) && nearest.dist < equilibriumRadius * 0.5) || nearest.dist < Math.min(1.5e-3, equilibriumRadius * 0.12));
+        const sinkArrival = nearest.role !== 'saddle' && (approaching || essentiallyThere);
+        if (saddleArrival || sinkArrival) {
           status = 'equilibriumReached';
           equilibriumId = nearest.id;
           break;

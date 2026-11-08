@@ -151,6 +151,11 @@ export interface EquilibriumAnalysis {
   subspaces: SubspaceInfo[];
   hartmanGrobmanApplies: boolean;
   hartmanGrobmanRadius?: number;
+  /**
+   * Cubic focus coefficient a in ṙ ≈ a r³, on the center plane of a weak focus.
+   * Negative a means forward time spirals in.
+   */
+  radialCubic?: number;
 }
 
 export interface StreamlineSegment {
@@ -170,6 +175,9 @@ export interface Nullcline {
   variableLatex: string;
   points: number[][][];
   formulaLatex: string;
+  /** Unsubstituted component, so the curve can be redrawn exactly in a new window. */
+  expression?: string;
+  variables?: [string, string];
 }
 
 export interface LimitCycle {
@@ -465,7 +473,7 @@ export interface Rk45Options {
   f: (t: number, y: number[], p: Record<string, number>) => number[];
   viewport?: ViewportBounds;
   viewportMargin?: number;
-  equilibria?: Array<{ id: string; coords: number[] }>;
+  equilibria?: Array<{ id: string; coords: number[]; role?: 'sink' | 'saddle' }>;
   equilibriumRadius?: number;
   velocityStop?: number;
   blowUpRadius?: number;

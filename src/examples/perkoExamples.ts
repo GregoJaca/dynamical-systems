@@ -641,11 +641,11 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
     title: 'Exercise 19',
     citation: 'Node and saddles',
     group: EXAM,
-    blurb: 'An unstable node at the origin and saddles at (1, 1) and (−1, 1).',
+    blurb: 'An unstable node at the origin and saddles at (1, 1) and (−1, 1). One nullcline is the v-axis together with the circle u² + v² = 2.',
     mode: 'autonomous',
     dimension: 2,
     stateVars: ['u', 'v'],
-    rows: ['2 * u - u^3 - u * v', 'v - u^2'],
+    rows: ['2 * u - u^3 - u * v^2', 'v - u^2'],
     parameters: {},
     groundTruth: {
       equilibria: [
@@ -653,6 +653,7 @@ export const PERKO_EXAMPLES: PerkoExample[] = [
         [0, 0],
         [1, 1],
       ],
+      originClassification2D: 'unstable_improper_node',
       polarRecommended: false,
     },
   },

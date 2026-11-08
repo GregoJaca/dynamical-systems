@@ -1,3 +1,5 @@
+import { algebraicZeroSet, traceImplicit } from '../numeric/algebraicCurve';
+
 /** Marching squares for a scalar field sampled on a rectilinear grid. `grid[j][i]` is (xs[i], ys[j]). */
 export function contourLines(grid: number[][], xs: number[], ys: number[], level: number): number[][][] {
   const segments: Array<[number, number, number, number]> = [];
@@ -176,6 +178,8 @@ export function levelContours(
   xMax: number,
   yMin: number,
   yMax: number,
+  expression?: string,
+  variables?: [string, string],
 ): number[][][] {
   const sampled = sampleGrid(evaluate, xMin, xMax, yMin, yMax, 48, 48);
   if (!sampled) return [];
@@ -187,12 +191,16 @@ export function levelContours(
   if (values.length < 8) return [];
   const lines: number[][][] = [];
   const quantiles = [0.22, 0.38, 0.54, 0.7, 0.86];
+  const tolerance = Math.max(xMax - xMin, yMax - yMin) / 500;
   let previous = Number.NaN;
   for (const quantile of quantiles) {
     const level = values[Math.min(values.length - 1, Math.floor(quantile * (values.length - 1)))] ?? 0;
     if (Number.isFinite(previous) && Math.abs(level - previous) <= 1e-9 * (1 + Math.abs(level))) continue;
     previous = level;
-    lines.push(...contourLines(sampled.grid, sampled.xs, sampled.ys, level));
+    const algebraic =
+      expression && variables ? algebraicZeroSet(`(${expression}) - (${level})`, variables, {}, { xMin, xMax, yMin, yMax }) : null;
+    if (algebraic && algebraic.polylines.length > 0) lines.push(...algebraic.polylines);
+    else lines.push(...traceImplicit((x, y) => evaluate(x, y) - level, { xMin, xMax, yMin, yMax }, tolerance));
   }
   return lines.filter((path) => path.length > 4);
 }

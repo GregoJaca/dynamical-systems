@@ -910,7 +910,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
       const revision = state.spec.revision;
       const compiled = state.compiled;
       const viewport = state.viewport;
-      const equilibria = state.analysis.equilibria.map((eq) => ({ id: eq.id, coords: eq.coords }));
+      const equilibria = state.analysis.equilibria;
       const id = `user-${Date.now().toString(36)}`;
       setTimeout(() => {
         if (get().spec.revision !== revision) return;

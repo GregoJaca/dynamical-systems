@@ -258,10 +258,73 @@ export function sanitizePoints(points: readonly (readonly number[])[]): number[]
 
 export function decimate(points: number[][], maxPoints: number): number[][] {
   if (points.length <= maxPoints || maxPoints < 2) return points;
-  const out: number[][] = [];
-  const step = (points.length - 1) / (maxPoints - 1);
-  for (let i = 0; i < maxPoints; i += 1) out.push(points[Math.round(i * step)] ?? points[points.length - 1] ?? []);
-  return out;
+  const diag = spanOf(points);
+  let lo = 0;
+  let hi = Math.max(diag, 1e-9);
+  let best = [points[0] ?? [], points[points.length - 1] ?? []];
+  for (let iter = 0; iter < 16; iter += 1) {
+    const mid = (lo + hi) / 2;
+    const simplified = douglasPeucker(points, mid);
+    if (simplified.length > maxPoints) lo = mid;
+    else {
+      best = simplified;
+      hi = mid;
+    }
+  }
+  return best.length > 1 ? best : points.slice(0, maxPoints);
+}
+
+function douglasPeucker(points: number[][], epsilon: number): number[][] {
+  const keep = new Array<boolean>(points.length).fill(false);
+  keep[0] = true;
+  keep[points.length - 1] = true;
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const range = stack.pop();
+    if (!range) break;
+    const [start, end] = range;
+    let worst = -1;
+    let worstDist = 0;
+    const a = points[start] ?? [];
+    const b = points[end] ?? [];
+    for (let index = start + 1; index < end; index += 1) {
+      const dist = segmentDistance(points[index] ?? [], a, b);
+      if (dist > worstDist) {
+        worstDist = dist;
+        worst = index;
+      }
+    }
+    if (worst >= 0 && worstDist > epsilon) {
+      keep[worst] = true;
+      stack.push([start, worst], [worst, end]);
+    }
+  }
+  return points.filter((_, index) => keep[index]);
+}
+
+function segmentDistance(point: number[], a: number[], b: number[]): number {
+  const ab = a.map((value, index) => (b[index] ?? 0) - value);
+  const length = Math.hypot(...ab);
+  if (length < 1e-14) return Math.hypot(...point.map((value, index) => value - (a[index] ?? 0)));
+  const ap = a.map((value, index) => (point[index] ?? 0) - value);
+  const cross = Math.hypot(
+    (ap[1] ?? 0) * (ab[2] ?? 0) - (ap[2] ?? 0) * (ab[1] ?? 0),
+    (ap[2] ?? 0) * (ab[0] ?? 0) - (ap[0] ?? 0) * (ab[2] ?? 0),
+    (ap[0] ?? 0) * (ab[1] ?? 0) - (ap[1] ?? 0) * (ab[0] ?? 0),
+  );
+  return cross / length;
+}
+
+function spanOf(points: number[][]): number {
+  const min = points[0]?.slice() ?? [0];
+  const max = min.slice();
+  for (const point of points) {
+    point.forEach((value, index) => {
+      min[index] = Math.min(min[index] ?? value, value);
+      max[index] = Math.max(max[index] ?? value, value);
+    });
+  }
+  return Math.hypot(...max.map((value, index) => value - (min[index] ?? 0)));
 }
 
 /**
@@ -319,13 +382,13 @@ export function mathToFlatThree(vertices: readonly number[]): Float32Array {
 }
 
 export function emphasisOpacity(id: string, hoverId: string | null, selectedId: string | null, base: number): number {
-  if (hoverId) return matchesFocus(id, hoverId) ? base : Math.min(base, 0.2);
-  if (selectedId && !matchesFocus(id, selectedId)) return Math.min(base, 0.34);
+  if (hoverId) return matchesFocus(id, hoverId) ? Math.min(1, base + 0.06) : base * 0.2;
+  if (selectedId && !matchesFocus(id, selectedId)) return base * 0.4;
   return base;
 }
 
 export function emphasisWidth(id: string, hoverId: string | null, selectedId: string | null, base: number): number {
-  if (matchesFocus(id, hoverId) || id === selectedId) return Math.max(base * 2.1, base + 1.4);
+  if (matchesFocus(id, hoverId) || id === selectedId) return base + 0.4;
   return base;
 }
 
