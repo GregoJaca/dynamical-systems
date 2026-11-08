@@ -201,6 +201,173 @@ h1 {
   border-bottom-color: var(--color-accent);
 }
 
+.math-keypad {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--color-paper) 88%, white);
+  border-top: 1px solid var(--color-rule);
+  box-shadow: 0 -12px 32px rgb(28 25 23 / 8%);
+  padding: 0.4rem 0.6rem calc(0.45rem + env(safe-area-inset-bottom));
+  animation: keypad-in 140ms ease-out;
+}
+
+body[data-theme='dark'] .math-keypad {
+  background: #141414;
+  box-shadow: 0 -12px 32px rgb(0 0 0 / 40%);
+}
+
+.math-keypad-inner {
+  max-width: 46rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.math-keypad-tabs,
+.math-keypad-system-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.math-keypad-tabs button,
+.math-keypad-system-row button {
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.95rem;
+}
+
+.math-keypad-tabs button[aria-selected='true'] {
+  color: var(--color-accent);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.math-keypad-tabs .spacer,
+.math-keypad-system-row span {
+  flex: 1;
+}
+
+.math-keypad-system-row span {
+  text-align: center;
+  font-size: 0.92rem;
+  opacity: 0.7;
+}
+
+.math-keypad-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr);
+  gap: 0.4rem;
+}
+
+.math-key-grid {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.math-key-grid.fns,
+.math-key-grid.nums,
+.math-key-grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.math-key-grid.tools {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.math-key-grid.eight {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.math-key-grid.scroll {
+  max-height: min(34vh, 15.5rem);
+  overflow: auto;
+}
+
+.math-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.7rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-paper) 40%, white);
+  color: inherit;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0.15rem;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+body[data-theme='dark'] .math-key {
+  background: #242424;
+}
+
+.math-key.op {
+  color: var(--color-accent);
+  font-size: 1.2rem;
+}
+
+.math-key.digit {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.12rem;
+}
+
+.math-key.dense {
+  font-size: 0.78rem;
+  letter-spacing: -0.02em;
+}
+
+.math-key:active {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-paper));
+}
+
+.math-key:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+body.keypad-open .system-page {
+  padding-bottom: calc(var(--keypad-h, 18rem) + 1.25rem);
+}
+
+body.keypad-open .side-body {
+  padding-bottom: calc(var(--keypad-h, 18rem) + 0.75rem);
+}
+
+body.keypad-open [data-math-field] {
+  scroll-margin-bottom: calc(var(--keypad-h, 18rem) + 0.75rem);
+  scroll-margin-top: 0.75rem;
+}
+
+@keyframes keypad-in {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 420px) {
+  .math-key {
+    min-height: 2.85rem;
+    font-size: 1rem;
+  }
+
+  .math-key-grid.eight {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
 .ghost {
   opacity: 0.45;
   display: inline-block;
