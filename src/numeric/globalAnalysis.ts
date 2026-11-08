@@ -13,8 +13,9 @@ import type {
 } from '../core/types';
 import { paintSymbolLatex, symbolToLatex } from '../input/parser';
 import {
-  differentiate,
+  algebraicMath,
   certifiedSign,
+  differentiate,
   expressionSign,
   integrateExpr,
   isIdenticallyZero,
@@ -23,6 +24,7 @@ import {
   substituteNumbers,
   trySimplify,
 } from './algebra';
+import { reduceTrigPolynomial } from './trigReduce';
 
 type BendixsonInfo = NonNullable<GlobalPropertiesAnalysis['bendixsonDulac']>;
 
@@ -89,6 +91,15 @@ export function finalizeGlobal(
 ): void {
   const lyapunov = analyzeLyapunov(spec, compiled, bundle.global.hamiltonianExpr);
   if (lyapunov) bundle.global.lyapunov = lyapunov;
+  if (lyapunov?.classification === 'strict_lyapunov') {
+    for (const eq of equilibria) {
+      if (!eq.coords.every((value) => Math.abs(value) < 1e-6)) continue;
+      if (eq.stability === 'asymptotically_stable') continue;
+      if (eq.isHyperbolic && eq.stability === 'unstable') continue;
+      eq.stability = 'asymptotically_stable';
+      eq.stabilityReasonLatex = lyapunov.conclusionLatex;
+    }
+  }
   if (bundle.polar && spec.dimension === 2) {
     const shift = polarTranslation(equilibria);
     if (shift) {
@@ -329,10 +340,12 @@ function polarSkeleton(rhs: string[], vars: string[], origin: number[] = [0, 0])
   const [x, y] = vars;
   const ox = formatShift(origin[0] ?? 0);
   const oy = formatShift(origin[1] ?? 0);
-  const fx = substituteExpr(rhs[0] ?? '0', { [x!]: `(${ox} + r * cos(theta))`, [y!]: `(${oy} + r * sin(theta))` });
-  const fy = substituteExpr(rhs[1] ?? '0', { [x!]: `(${ox} + r * cos(theta))`, [y!]: `(${oy} + r * sin(theta))` });
-  const rDot = `(((r * cos(theta)) * (${fx}) + (r * sin(theta)) * (${fy})) / r)`;
-  const thetaDot = `(((r * cos(theta)) * (${fy}) - (r * sin(theta)) * (${fx})) / (r ^ 2))`;
+  const xExpr = shifted(ox, 'r * cos(theta)');
+  const yExpr = shifted(oy, 'r * sin(theta)');
+  const fx = substituteExpr(rhs[0] ?? '0', { [x!]: xExpr, [y!]: yExpr });
+  const fy = substituteExpr(rhs[1] ?? '0', { [x!]: xExpr, [y!]: yExpr });
+  const rDot = polishTrig(`(((r * cos(theta)) * (${fx}) + (r * sin(theta)) * (${fy})) / r)`);
+  const thetaDot = polishTrig(`(((r * cos(theta)) * (${fy}) - (r * sin(theta)) * (${fx})) / (r ^ 2))`);
   return {
     isRecommended: false,
     rDotLatex: `\\dot r = ${expressionToDisplay(rDot, ['r', 'theta'])}`,
@@ -348,9 +361,9 @@ function cylindricalSkeleton(rhs: string[], vars: string[]): CylindricalAnalysis
   const [x, y, z] = vars;
   const map = { [x!]: '(r * cos(theta))', [y!]: '(r * sin(theta))', [z!]: 'z' };
   const f = rhs.map((expr) => substituteExpr(expr, map));
-  const rDot = `(((r * cos(theta)) * (${f[0]}) + (r * sin(theta)) * (${f[1]})) / r)`;
-  const thetaDot = `(((r * cos(theta)) * (${f[1]}) - (r * sin(theta)) * (${f[0]})) / (r ^ 2))`;
-  const zDot = f[2] ?? '0';
+  const rDot = polishTrig(`(((r * cos(theta)) * (${f[0]}) + (r * sin(theta)) * (${f[1]})) / r)`);
+  const thetaDot = polishTrig(`(((r * cos(theta)) * (${f[1]}) - (r * sin(theta)) * (${f[0]})) / (r ^ 2))`);
+  const zDot = polishTrig(f[2] ?? '0');
   return {
     isRecommended: false,
     rDotLatex: `\\dot r = ${expressionToDisplay(rDot, ['r', 'theta', 'z'])}`,
@@ -397,8 +410,40 @@ function polarTranslation(equilibria: EquilibriumAnalysis[]): { coords: number[]
   return { coords, latex: `(${coords.map((value) => latexNumber(value).replace(/\\frac\{(\d+)\}\{(\d+)\}/g, '$1/$2')).join(', ')})` };
 }
 
+function shifted(origin: string, trig: string): string {
+  return origin === '0' ? trig : `(${origin} + ${trig})`;
+}
+
+function polishTrig(expr: string): string {
+  if (!expr.includes('sin') && !expr.includes('cos')) return expr;
+  const reduced = reduceTrigPolynomial(expr);
+  if (!reduced || reduced === expr) return expr;
+  return agrees(expr, reduced) ? reduced : expr;
+}
+
+function agrees(original: string, reduced: string): boolean {
+  const samples = [
+    { r: 0.4, theta: 0.3, mu: 0.5, rho: 0.8, z: -0.2 },
+    { r: 1.2, theta: 1.4, mu: 1, rho: 1.5, z: 0.7 },
+    { r: 2.5, theta: -0.8, mu: -0.4, rho: 2, z: 1.1 },
+  ];
+  try {
+    const left = compile(original);
+    const right = compile(reduced);
+    return samples.every((sample) => {
+      const a = Number(left.evaluate(sample));
+      const b = Number(right.evaluate(sample));
+      return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 1e-6 * (1 + Math.abs(a));
+    });
+  } catch {
+    return false;
+  }
+}
+
 function formatShift(value: number): string {
   if (Math.abs(value) < 1e-8) return '0';
+  const algebraic = algebraicMath(value);
+  if (algebraic) return algebraic;
   for (let den = 1; den <= 12; den += 1) {
     const num = Math.round(value * den);
     if (Math.abs(value - num / den) < 1e-8) {
@@ -509,6 +554,8 @@ export function radialEquilibria(polar: PolarAnalysis, parameters: Record<string
 }
 
 export function cyclesFromPolar(polar: PolarAnalysis): LimitCycle[] {
+  // A root of r-dot at one angle is not a closed orbit when the radial speed still depends on θ.
+  if (/theta|\bsin\b|\bcos\b/.test(polar.rDotExpr)) return [];
   return polar.radialEquilibriaR
     .map((radius, index) => ({ radius, stability: polar.radialStability[index] ?? 'unknown' }))
     .filter((item) => item.stability !== 'unknown')

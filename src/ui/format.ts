@@ -26,10 +26,11 @@ export function prettyLabel(value: string | undefined): string {
 export function complexLatex(lambda: Pick<ComplexEigenvalue, 're' | 'im' | 'exactLatex'>): string {
   if (lambda.exactLatex) return lambda.exactLatex;
   const imaginary = Math.abs(lambda.im) < 1e-10 ? 0 : lambda.im;
-  if (imaginary === 0) return rationalLabel(lambda.re);
-  const imAbs = rationalLabel(Math.abs(imaginary));
-  if (Math.abs(lambda.re) < 1e-10) return imaginary < 0 ? `-${imAbs} i` : `${imAbs} i`;
-  return `${rationalLabel(lambda.re)} ${imaginary < 0 ? '-' : '+'} ${imAbs} i`;
+  if (imaginary === 0) return latexNumber(lambda.re);
+  const imAbs = latexNumber(Math.abs(imaginary));
+  const imag = imAbs === '1' ? 'i' : `${imAbs} i`;
+  if (Math.abs(lambda.re) < 1e-10) return imaginary < 0 ? `-${imag}` : imag;
+  return `${latexNumber(lambda.re)} ${imaginary < 0 ? '-' : '+'} ${imag}`;
 }
 
 export function vectorLatex(vector: number[]): string {

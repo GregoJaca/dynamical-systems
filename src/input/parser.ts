@@ -120,15 +120,15 @@ export function compileSystemNumeric(spec: SystemSpec): CompiledSystem {
     const scope = buildScope(t, x, p);
     return jacobianCode.map((row, rowIndex) =>
       row.map((code, columnIndex) => {
-        if (!code) return numericPartial(f, t, x, p, rowIndex, columnIndex);
+        if (!code) return resolvedPartial(f, t, x, p, rowIndex, columnIndex, Number.NaN);
         try {
           const value = numericValue(code.evaluate(scope));
-          // A fractional power can make the symbolic derivative undefined at an
-          // equilibrium even though the vector field itself is fine there.
-          if (!Number.isFinite(value)) return numericPartial(f, t, x, p, rowIndex, columnIndex);
-          return value;
+          if (Number.isFinite(value) && Math.abs(value) >= 1e-4) return value;
+          // A fractional power is often undefined at an equilibrium, or it
+          // evaluates to a tiny number that shrinks when the difference step grows.
+          return resolvedPartial(f, t, x, p, rowIndex, columnIndex, value);
         } catch {
-          return numericPartial(f, t, x, p, rowIndex, columnIndex);
+          return resolvedPartial(f, t, x, p, rowIndex, columnIndex, Number.NaN);
         }
       }),
     );
@@ -430,6 +430,22 @@ function numericValue(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : Number.NaN;
 }
 
+function resolvedPartial(
+  f: (t: number, x: number[], p: Record<string, number>) => number[],
+  t: number,
+  x: number[],
+  p: Record<string, number>,
+  row: number,
+  column: number,
+  symbolic: number,
+): number {
+  const fine = numericPartial(f, t, x, p, row, column, 1e-6);
+  const coarse = numericPartial(f, t, x, p, row, column, 1e-3);
+  if (Math.abs(fine) < 1e-3 && Math.abs(coarse) < 0.25 && Math.abs(coarse) > 20 * Math.max(Math.abs(fine), 1e-8)) return 0;
+  if (Number.isFinite(symbolic)) return symbolic;
+  return fine;
+}
+
 function numericPartial(
   f: (t: number, x: number[], p: Record<string, number>) => number[],
   t: number,
@@ -437,8 +453,9 @@ function numericPartial(
   p: Record<string, number>,
   row: number,
   column: number,
+  stepScale = 1e-7,
 ): number {
-  const step = 1e-7 * (1 + Math.abs(x[column] ?? 0));
+  const step = stepScale * (1 + Math.abs(x[column] ?? 0));
   const plus = x.slice();
   const minus = x.slice();
   plus[column] = (plus[column] ?? 0) + step;

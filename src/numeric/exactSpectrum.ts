@@ -1,25 +1,31 @@
 import { evaluate } from 'mathjs';
 import type { EquilibriumAnalysis } from '../core/types';
-import { differentiate, latexNumber, substituteExpr, trySimplify } from './algebra';
+import { algebraicMath, differentiate, latexNumber, substituteExpr, substituteNumbers, trySimplify } from './algebra';
 
-/** Fill trace, determinant, and eigenvalues with exact expressions when the equilibrium is rational. */
-export function attachExactSpectrum(eq: EquilibriumAnalysis, rhs: string[], vars: string[]): void {
+/** Fill trace, determinant, and eigenvalues with exact expressions when the equilibrium is rational or a simple radical. */
+export function attachExactSpectrum(
+  eq: EquilibriumAnalysis,
+  rhs: string[],
+  vars: string[],
+  parameters: Record<string, number> = {},
+): void {
   if (vars.length < 2 || rhs.length < 2) return;
   const snapped = eq.coords.slice(0, vars.length).map(rationalText);
   if (snapped.some((value) => value == null)) return;
   const map = Object.fromEntries(vars.map((name, index) => [name, snapped[index]!]));
+  const substituted = rhs.map((expr) => substituteNumbers(expr, parameters));
   let entries: string[][];
   try {
-    entries = rhs.slice(0, vars.length).map((expr) => vars.map((variable) => trySimplify(substituteExpr(differentiate(expr, variable), map))));
+    entries = substituted.slice(0, vars.length).map((expr) => vars.map((variable) => trySimplify(substituteExpr(differentiate(expr, variable), map))));
   } catch {
     return;
   }
-  if (entries.some((row) => row.some((entry) => /[A-Za-z_]/.test(entry)))) return;
+  if (entries.some((row) => row.some((entry) => !evaluableConstant(entry)))) return;
   if (vars.length !== 2) return;
   const trace = trySimplify(`(${entries[0]?.[0] ?? '0'})+(${entries[1]?.[1] ?? '0'})`);
   const det = trySimplify(`((${entries[0]?.[0] ?? '0'})*(${entries[1]?.[1] ?? '0'}))-((${entries[0]?.[1] ?? '0'})*(${entries[1]?.[0] ?? '0'}))`);
   const disc = trySimplify(`((${trace})^2)-(4*(${det}))`);
-  if ([trace, det, disc].some((expr) => /[A-Za-z_]/.test(expr))) return;
+  if ([trace, det, disc].some((expr) => !evaluableConstant(expr))) return;
   eq.jacobianExactLatex = `\\begin{pmatrix} ${entries
     .slice(0, 2)
     .map((row) => row.slice(0, 2).map((entry) => texConstant(entry)).join(' & '))
@@ -54,9 +60,17 @@ function rationalText(value: number): string | null {
   if (Math.abs(value) < 1e-9) return '0';
   for (let den = 1; den <= 12; den += 1) {
     const num = Math.round(value * den);
-    if (Math.abs(value - num / den) < 1e-8) return den === 1 ? String(num) : `${num}/${den}`;
+    if (Math.abs(value - num / den) < 1e-8) return den === 1 ? String(num) : `(${num}/${den})`;
   }
-  return null;
+  return algebraicMath(value);
+}
+
+function evaluableConstant(expr: string): boolean {
+  try {
+    return Number.isFinite(Number(evaluate(trySimplify(expr))));
+  } catch {
+    return false;
+  }
 }
 
 function texConstant(expr: string): string {
@@ -119,8 +133,63 @@ function quadraticRoots(traceExpr: string, discExpr: string): Array<{ re: number
 }
 
 function combine(left: string, right: string, sign: '+' | '-'): string {
+  const merged = mergeTerms(left, right, sign);
+  if (merged) return merged;
   if (left === '0') return sign === '-' ? `-${parenthesize(right)}` : right;
   return `${left} ${sign} ${right}`;
+}
+
+function mergeTerms(left: string, right: string, sign: '+' | '-'): string | null {
+  const rational = parseFraction(left);
+  const other = parseFraction(right);
+  if (rational && other) {
+    const n = rational.n * other.d + (sign === '+' ? 1 : -1) * other.n * rational.d;
+    return fractionTex(n, rational.d * other.d);
+  }
+  const radical = parseRadical(right);
+  if (!rational || !radical) return null;
+  const signed = sign === '+' ? radical.n : -radical.n;
+  const shared = gcd(gcd(Math.abs(rational.n * radical.d), Math.abs(signed * rational.d)), rational.d * radical.d);
+  const den = (rational.d * radical.d) / shared;
+  const rationalNum = (rational.n * radical.d) / shared;
+  const radicalNum = (signed * rational.d) / shared;
+  if (radical.inside === 1) return fractionTex(rationalNum + radicalNum, den);
+  const radicalBody = Math.abs(radicalNum) === 1 ? `\\sqrt{${radical.inside}}` : `${Math.abs(radicalNum)}\\sqrt{${radical.inside}}`;
+  if (rationalNum === 0) {
+    const bare = radicalNum > 0 ? radicalBody : `-${radicalBody}`;
+    return den === 1 ? bare : radicalNum > 0 ? `\\frac{${radicalBody}}{${den}}` : `-\\frac{${radicalBody}}{${den}}`;
+  }
+  if (den === 1) {
+    if (rationalNum > 0 && radicalNum > 0) return `${rationalNum} + ${radicalBody}`;
+    if (rationalNum > 0 && radicalNum < 0) return `${rationalNum} - ${radicalBody}`;
+    if (rationalNum < 0 && radicalNum > 0) return `${radicalBody} - ${Math.abs(rationalNum)}`;
+    return `-(${Math.abs(rationalNum)} + ${radicalBody})`;
+  }
+  let numerator: string;
+  if (rationalNum > 0 && radicalNum > 0) numerator = `${rationalNum} + ${radicalBody}`;
+  else if (rationalNum > 0 && radicalNum < 0) numerator = `${rationalNum} - ${radicalBody}`;
+  else if (rationalNum < 0 && radicalNum > 0) numerator = `${radicalBody} - ${Math.abs(rationalNum)}`;
+  else numerator = `-${Math.abs(rationalNum)} - ${radicalBody}`;
+  if (rationalNum < 0 && radicalNum < 0) return `-\\frac{${Math.abs(rationalNum)} + ${radicalBody}}{${den}}`;
+  return `\\frac{${numerator}}{${den}}`;
+}
+
+function parseFraction(tex: string): { n: number; d: number } | null {
+  const whole = /^(-?\d+)$/.exec(tex);
+  if (whole) return { n: Number(whole[1]), d: 1 };
+  const frac = /^(-)?\\frac\{(\d+)\}\{(\d+)\}$/.exec(tex);
+  if (!frac) return null;
+  return { n: (frac[1] ? -1 : 1) * Number(frac[2]), d: Number(frac[3]) };
+}
+
+function parseRadical(tex: string): { n: number; d: number; inside: number } | null {
+  const bare = /^(-)?(?:(\d+))?\\sqrt\{(\d+)\}$/.exec(tex);
+  if (bare) return { n: (bare[1] ? -1 : 1) * Number(bare[2] ?? 1), d: 1, inside: Number(bare[3]) };
+  const wrapped = /^(-)?\\frac\{(?:(\d+))?\\sqrt\{(\d+)\}\}\{(\d+)\}$/.exec(tex);
+  if (wrapped) return { n: (wrapped[1] ? -1 : 1) * Number(wrapped[2] ?? 1), d: Number(wrapped[4]), inside: Number(wrapped[3]) };
+  const rational = parseFraction(tex);
+  if (rational) return { ...rational, inside: 1 };
+  return null;
 }
 
 function combineImaginary(left: string, right: string, sign: '+' | '-'): string {

@@ -4,7 +4,7 @@
  */
 
 import { EigenvalueDecomposition, Matrix } from 'ml-matrix';
-import { derivative, parse, simplify, type MathNode } from 'mathjs';
+import { derivative, evaluate, parse, simplify, type MathNode } from 'mathjs';
 
 /** mathjs nodes are not a discriminated union, so reads go through this view. */
 type Ast = MathNode & {
@@ -108,13 +108,147 @@ export function mathLiteral(value: number): string {
 }
 
 export function latexNumber(value: number): string {
-  if (Math.abs(value) < 1e-10) return '0';
-  const rational = rationalize(value, 12);
+  if (!Number.isFinite(value) || Math.abs(value) < 1e-10) return '0';
+  const rational = rationalize(value, 24);
   if (rational) return fractionLatex(rational.n, rational.d);
+  const pi = piLatex(value);
+  if (pi) return pi;
   const radical = radicalLatex(value);
   if (radical) return radical;
+  const quadratic = quadraticLatex(value);
+  if (quadratic) return quadratic;
   const text = Number(value.toPrecision(6)).toString();
   return text.startsWith('-') ? `-${text.slice(1)}` : text;
+}
+
+/**
+ * mathjs literal for a multiple of π or a quadratic irrational, parenthesized
+ * so it can be dropped into a larger expression. Null when the value is not one.
+ */
+export function algebraicMath(value: number): string | null {
+  if (!Number.isFinite(value) || Math.abs(value) < 1e-10) return null;
+  if (rationalize(value, 24)) return null;
+  const pi = piParts(value);
+  if (pi) {
+    if (pi.d === 1) return pi.n === 1 ? 'pi' : pi.n === -1 ? '(-pi)' : `(${pi.n} * pi)`;
+    return `((${pi.n} * pi) / ${pi.d})`;
+  }
+  const quad = matchQuadratic(value);
+  if (!quad) return null;
+  const radical = quad.q === 1 ? `sqrt(${quad.s})` : quad.q === -1 ? `(-sqrt(${quad.s}))` : `(${quad.q} * sqrt(${quad.s}))`;
+  const sum = quad.p === 0 ? radical : `(${quad.p} + ${radical})`;
+  return quad.d === 1 ? sum : `(${sum} / ${quad.d})`;
+}
+
+/** Replace a float by the rational or quadratic it matches, when the vector field still vanishes there. */
+export function snapAlgebraic(value: number): number {
+  if (!Number.isFinite(value) || Math.abs(value) < 1e-10) return 0;
+  for (let denominator = 1; denominator <= 24; denominator += 1) {
+    const numerator = Math.round(value * denominator);
+    if (Math.abs(value - numerator / denominator) <= 1e-6 * Math.max(1, Math.abs(value))) return numerator / denominator;
+  }
+  const rational = rationalize(value, 24);
+  if (rational) return rational.n / rational.d;
+  const literal = algebraicMath(value);
+  if (!literal) return value;
+  try {
+    const snapped = Number(evaluate(literal));
+    if (Number.isFinite(snapped)) return snapped;
+  } catch {
+    return value;
+  }
+  return value;
+}
+
+const ALGEBRAIC_TOL = 1e-9;
+
+function piParts(value: number): { n: number; d: number } | null {
+  const ratio = value / Math.PI;
+  const rational = rationalize(ratio, 12);
+  if (!rational || rational.n === 0) return null;
+  const reconstructed = (rational.n / rational.d) * Math.PI;
+  if (Math.abs(value - reconstructed) > ALGEBRAIC_TOL * Math.max(1, Math.abs(value))) return null;
+  return rational;
+}
+
+function piLatex(value: number): string | null {
+  const parts = piParts(value);
+  if (!parts) return null;
+  const sign = parts.n < 0 ? '-' : '';
+  const mag = Math.abs(parts.n);
+  if (parts.d === 1) return mag === 1 ? `${sign}\\pi` : `${sign}${mag}\\pi`;
+  if (mag === 1) return `${sign}\\frac{\\pi}{${parts.d}}`;
+  return `${sign}\\frac{${mag}\\pi}{${parts.d}}`;
+}
+
+interface QuadraticParts {
+  p: number;
+  q: number;
+  s: number;
+  d: number;
+}
+
+/**
+ * (p + q √s) / d from a quadratic equation c t² + b t + a = 0 with small integers.
+ * A is chosen as the integer nearest -(c x² + b x), so the search stays linear in the coefficient bound.
+ */
+function matchQuadratic(value: number): QuadraticParts | null {
+  const scale = Math.max(1, Math.abs(value));
+  let best: QuadraticParts & { score: number; err: number } | null = null;
+  for (let c = 1; c <= 8; c += 1) {
+    for (let b = -160; b <= 160; b += 1) {
+      const a = Math.round(-(c * value * value + b * value));
+      if (Math.abs(a) > 500) continue;
+      const err = Math.abs(c * value * value + b * value + a);
+      const magnitude = 1 + Math.abs(c * value * value) + Math.abs(b * value) + Math.abs(a);
+      if (err > 1e-12 * magnitude) continue;
+      const disc = b * b - 4 * c * a;
+      if (disc <= 0) continue;
+      const pulled = pullSquares(disc);
+      if (pulled.inside <= 1) continue;
+      const root = Math.sqrt(disc);
+      const plus = (-b + root) / (2 * c);
+      const sign = Math.abs(plus - value) <= Math.abs((-b - root) / (2 * c) - value) ? 1 : -1;
+      const reduced = reduceQuadratic(-b, sign * pulled.outside, pulled.inside, 2 * c);
+      if (!reduced || reduced.q === 0) continue;
+      const reconstructed = (reduced.p + reduced.q * Math.sqrt(reduced.s)) / reduced.d;
+      const residual = Math.abs(reconstructed - value);
+      if (residual > 1e-12 * scale) continue;
+      const score = Math.abs(reduced.p) + Math.abs(reduced.q) + reduced.d + reduced.s + c;
+      if (!best || score < best.score || (score === best.score && residual < best.err)) {
+        best = { ...reduced, score, err: residual };
+      }
+    }
+  }
+  return best ? { p: best.p, q: best.q, s: best.s, d: best.d } : null;
+}
+
+function reduceQuadratic(p: number, q: number, s: number, d: number): QuadraticParts | null {
+  if (d < 0) return reduceQuadratic(-p, -q, s, -d);
+  const shared = gcd(gcd(Math.abs(p), Math.abs(q)), d);
+  return { p: p / shared, q: q / shared, s, d: d / shared };
+}
+
+function quadraticLatex(value: number): string | null {
+  const parts = matchQuadratic(value);
+  if (!parts) return null;
+  const { p, q, s, d } = parts;
+  const radical = Math.abs(q) === 1 ? `\\sqrt{${s}}` : `${Math.abs(q)}\\sqrt{${s}}`;
+  if (p === 0) {
+    const body = q > 0 ? radical : `-${radical}`;
+    return d === 1 ? body : q > 0 ? `\\frac{${radical}}{${d}}` : `-\\frac{${radical}}{${d}}`;
+  }
+  let numerator: string;
+  if (p > 0 && q > 0) numerator = `${p} + ${radical}`;
+  else if (p > 0 && q < 0) numerator = `${p} - ${radical}`;
+  else if (p < 0 && q > 0) numerator = `${radical} - ${Math.abs(p)}`;
+  else numerator = `-${Math.abs(p)} - ${radical}`;
+  if (d === 1) {
+    if (p < 0 && q < 0) return `-(${Math.abs(p)} + ${radical})`;
+    return numerator;
+  }
+  if (p < 0 && q < 0) return `-\\frac{${Math.abs(p)} + ${radical}}{${d}}`;
+  return `\\frac{${numerator}}{${d}}`;
 }
 
 function fractionLatex(numerator: number, denominator: number): string {
@@ -129,8 +263,9 @@ function fractionLatex(numerator: number, denominator: number): string {
 
 /** ±√(p/q) when the square of the value is a simple rational. */
 function radicalLatex(value: number): string | null {
-  const square = rationalize(value * value, 24);
+  const square = rationalize(value * value, 256);
   if (!square || square.n <= 0) return null;
+  if (Math.abs(value * value - square.n / square.d) > 1e-12 * Math.max(1, Math.abs(value * value))) return null;
   const sign = value < 0 ? '-' : '';
   const shared = gcd(square.n, square.d);
   const n = square.n / shared;

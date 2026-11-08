@@ -312,7 +312,6 @@ function applyCenterStability(eq: EquilibriumAnalysis, reduced: { degree: number
   }
   if (reduced.degree % 2 === 1 && reduced.coeff < 0 && transverseReal < -1e-7) {
     eq.stability = 'asymptotically_stable';
-    eq.classification2D = eq.classification2D === 'saddle_node' ? 'unknown_non_hyperbolic' : eq.classification2D;
     eq.stabilityReasonLatex = `On the center manifold, \\(\\dot{u} = ${reducedMonomial(reduced.coeff, reduced.degree)}\\) with a stable transverse eigenvalue, so the equilibrium is asymptotically stable.`;
     return;
   }

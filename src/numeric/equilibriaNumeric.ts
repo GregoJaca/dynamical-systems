@@ -1,5 +1,5 @@
 import type { CompiledSystem, EquilibriumAnalysis, EquilibriumType2D, EquilibriumType3D, StabilityVerdict } from '../core/types';
-import { latexNumber } from './algebra';
+import { latexNumber, snapAlgebraic } from './algebra';
 import { attachExactSpectrum } from './exactSpectrum';
 import {
   buildSubspaces,
@@ -62,6 +62,8 @@ function analyzeEquilibrium(
   rootCount: number,
 ): EquilibriumAnalysis {
   const { compiled } = search;
+  const snapped = coords.map((value) => snapAlgebraic(value));
+  if (infNorm(compiled.f(0, snapped, compiled.parameterValues)) <= 1e-7) coords = snapped;
   const jacobian = compiled.J(0, coords, compiled.parameterValues).map((row) => row.map((value) => (Number.isFinite(value) ? value : 0)));
   const spectrum = decompose(jacobian);
   const trace = traceOf(jacobian);
@@ -94,6 +96,7 @@ function analyzeEquilibrium(
   const built: EquilibriumAnalysis = {
     id: `eq-${index}`,
     coords,
+    coordsExactLatex: coords.map((value) => latexNumber(value)),
     sourceMethod: 'numeric_newton',
     jacobianNumeric: jacobian,
     trace: { value: trace },
@@ -111,7 +114,9 @@ function analyzeEquilibrium(
     hartmanGrobmanApplies: classified.hyperbolic,
     hartmanGrobmanRadius: classified.hyperbolic ? hartmanRadius(compiled, coords, jacobian) : undefined,
   };
-  if (search.rhsExpressions && search.stateVars) attachExactSpectrum(built, search.rhsExpressions, search.stateVars);
+  if (search.rhsExpressions && search.stateVars) {
+    attachExactSpectrum(built, search.rhsExpressions, search.stateVars, compiled.parameterValues);
+  }
   return built;
 }
 
@@ -158,7 +163,9 @@ function classify(input: ClassInput): {
       hyperbolic,
       reason: hyperbolic
         ? "Hartman--Grobman: the equilibrium is hyperbolic, so the nonlinear flow is topologically equivalent to its linearization."
-        : 'A center direction is present, so linearization does not decide stability.',
+        : stability === 'unstable'
+          ? 'An eigenvalue has positive real part, so the equilibrium is unstable.'
+          : 'A center direction is present, so linearization does not decide stability.',
     };
   }
   const stability = stabilityFromSpectrum(input.eigenvalues, hyperbolic);
@@ -166,7 +173,11 @@ function classify(input: ClassInput): {
     classification3D: 'higher_dim_equilibrium',
     stability,
     hyperbolic,
-    reason: hyperbolic ? 'Every eigenvalue has nonzero real part.' : 'At least one eigenvalue lies on the imaginary axis.',
+    reason: hyperbolic
+      ? 'Every eigenvalue has nonzero real part.'
+      : stability === 'unstable'
+        ? 'An eigenvalue has positive real part, so the equilibrium is unstable.'
+        : 'At least one eigenvalue lies on the imaginary axis.',
   };
 }
 
@@ -281,8 +292,9 @@ function classify3D(spectrum: Spectrum): EquilibriumType3D {
 }
 
 function stabilityFromSpectrum(spectrum: Spectrum, hyperbolic: boolean): StabilityVerdict {
+  if (spectrum.eigenvalues.some((lambda) => lambda.re > HYPERBOLIC_TOL)) return 'unstable';
   if (!hyperbolic) return 'undetermined';
-  return spectrum.eigenvalues.every((lambda) => lambda.re < 0) ? 'asymptotically_stable' : 'unstable';
+  return 'asymptotically_stable';
 }
 
 function algebraicMultiplicity(spectrum: Spectrum, value: number): number {
@@ -373,7 +385,7 @@ function polishRoot(compiled: CompiledSystem, x: number[]): number[] {
   const params = compiled.parameterValues;
   let current = x.slice();
   let residual = infNorm(compiled.f(0, current, params));
-  const snapped = current.map((value) => (Math.abs(value) < 1e-4 ? 0 : value));
+  const snapped = current.map((value) => (Math.abs(value) < 5e-4 ? 0 : value));
   const snappedResidual = infNorm(compiled.f(0, snapped, params));
   if (snappedResidual <= residual + 1e-15) {
     current = snapped;
