@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { PhaseCanvas2D } from '../render2d/PhaseCanvas2D';
 import { PhaseLine1D } from '../render2d/PhaseLine1D';
 import { PolarPhaseCanvas2D } from '../render2d/PolarPhaseCanvas2D';
@@ -14,6 +14,21 @@ import { hideObjects } from './filterAnalysis';
 import { ObjectTree } from './ObjectTree';
 import { TheoremsPanel } from './TheoremsPanel';
 import { downloadPortrait } from './downloadPortrait';
+
+function useNarrowStudy() {
+  const query = '(max-width: 860px)';
+  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setNarrow(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  return narrow;
+}
 
 function Portrait() {
   const spec = useSystemStore((state) => state.spec);
@@ -47,80 +62,102 @@ function Portrait() {
   const polar = analysis.coordinateTransforms.polar2D;
   const polarUseful = Boolean(polar?.isRecommended);
 
+  const showPolar = show2d && polarUseful;
+  const showSeries = layers.timeSeries && spec.dimension < 4;
+
+  const primary = (
+      <div className={showHigh ? 'portrait-primary portrait-tall' : 'portrait-primary'}>
+        {showHigh ? (
+          <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} role="stacked" />
+        ) : (
+          <>
+            <h2>Phase portrait</h2>
+            <div className="stage">
+              {showLine && <PhaseLine1D spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} />}
+              {show2d && (
+                <PhaseCanvas2D
+                  spec={spec}
+                  analysis={analysis}
+                  layers={layers}
+                  particles={particles}
+                  theme={theme}
+                  hoverObjectId={hoverObjectId}
+                  selectedObjectId={selectedObjectId}
+                  linearization={linearization}
+                  flowMap={flowMap}
+                  userOrbits={userOrbits}
+                  compiled={compiled}
+                  onHoverObject={hoverObject}
+                  onSelectObject={selectObject}
+                  onViewportChange={setViewport}
+                  onTracePoint={tracePoint}
+                  onFlowMapChange={setFlowMap}
+                  onResetViewport={resetViewport}
+                />
+              )}
+              {show3d && (
+                <PhaseScene3D
+                  spec={spec}
+                  analysis={analysis}
+                  layers={layers}
+                  theme={theme}
+                  particles={particles}
+                  userOrbits={userOrbits}
+                  selectedObjectId={selectedObjectId}
+                  hoverObjectId={hoverObjectId}
+                  onSelectObject={selectObject}
+                  onTracePoint={tracePoint}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </div>
+  );
+
+  const extras =
+    showPolar || showSeries ? (
+        <div className="portrait-extras">
+          {showPolar && (
+            <section className="below">
+              <h2>Polar coordinates</h2>
+              <div className="stage polar-stage">
+                <PolarPhaseCanvas2D
+                  spec={spec}
+                  analysis={analysis}
+                  theme={theme}
+                  compiled={compiled}
+                  layers={layers}
+                  hoverObjectId={hoverObjectId}
+                  selectedObjectId={selectedObjectId}
+                  userOrbits={userOrbits}
+                  particles={particles}
+                  onTracePolar={tracePolar}
+                />
+              </div>
+            </section>
+          )}
+          {showSeries && (
+            <section className="below">
+              <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} role="series" />
+            </section>
+          )}
+        </div>
+    ) : null;
+
   return (
     <div className="portrait-page">
-      {showHigh ? (
-        <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} role="stacked" />
-      ) : (
-        <>
-          <h2>Phase portrait</h2>
-          <div className="stage">
-        {showLine && <PhaseLine1D spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} />}
-        {show2d && (
-          <PhaseCanvas2D
-            spec={spec}
-            analysis={analysis}
-            layers={layers}
-            particles={particles}
-            theme={theme}
-            hoverObjectId={hoverObjectId}
-            selectedObjectId={selectedObjectId}
-            linearization={linearization}
-            flowMap={flowMap}
-            userOrbits={userOrbits}
-            compiled={compiled}
-            onHoverObject={hoverObject}
-            onSelectObject={selectObject}
-            onViewportChange={setViewport}
-            onTracePoint={tracePoint}
-            onFlowMapChange={setFlowMap}
-            onResetViewport={resetViewport}
-          />
-        )}
-        {show3d && (
-          <PhaseScene3D
-            spec={spec}
-            analysis={analysis}
-            layers={layers}
-            theme={theme}
-            particles={particles}
-            userOrbits={userOrbits}
-            selectedObjectId={selectedObjectId}
-            hoverObjectId={hoverObjectId}
-            onSelectObject={selectObject}
-            onTracePoint={tracePoint}
-          />
-        )}
-          </div>
-        </>
-      )}
-
-      {show2d && polarUseful && (
-        <section className="below">
-          <h2>Polar coordinates</h2>
-          <div className="stage polar-stage">
-            <PolarPhaseCanvas2D
-              spec={spec}
-              analysis={analysis}
-              theme={theme}
-              compiled={compiled}
-              layers={layers}
-              hoverObjectId={hoverObjectId}
-              selectedObjectId={selectedObjectId}
-              userOrbits={userOrbits}
-              particles={particles}
-              onTracePolar={tracePolar}
-            />
-          </div>
-        </section>
-      )}
-      {layers.timeSeries && spec.dimension < 4 && (
-        <section className="below">
-          <HigherDimView spec={spec} analysis={analysis} theme={theme} compiled={compiled} onTracePoint={tracePoint} role="series" />
-        </section>
-      )}
+      {primary}
+      {extras}
     </div>
   );
+}
+
+function clampPanel(total: number, height: number) {
+  const minPanel = 124;
+  const minPicture = 160;
+  const maxPanel = Math.max(minPanel, total - minPicture);
+  return Math.min(maxPanel, Math.max(minPanel, height));
 }
 
 function Visualization() {
@@ -211,6 +248,53 @@ export function AppShell() {
   const copyShareLink = useSystemStore((state) => state.copyShareLink);
   const [notice, setNotice] = useState('');
   const [studyTab, setStudyTab] = useState<'system' | 'picture' | 'notes'>('system');
+  const narrow = useNarrowStudy();
+  const sideScrollRef = useRef<HTMLDivElement>(null);
+  const studyRef = useRef<HTMLDivElement>(null);
+  const splitDrag = useRef<{ pointer: number; startY: number; startHeight: number } | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  const openStudyTab = (tab: 'system' | 'picture' | 'notes') => {
+    setStudyTab(tab);
+    if (narrow) sideScrollRef.current?.scrollTo({ top: 0 });
+  };
+
+  useEffect(() => {
+    if (!narrow) return;
+    const grid = studyRef.current;
+    if (!grid) return;
+    setPanelHeight((current) => clampPanel(grid.clientHeight, current ?? Math.round(grid.clientHeight * 0.42)));
+  }, [narrow]);
+
+  useEffect(() => {
+    const grid = studyRef.current;
+    if (!grid || !narrow) return;
+    const observer = new ResizeObserver(() => {
+      setPanelHeight((current) => (current == null ? current : clampPanel(grid.clientHeight, current)));
+    });
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [narrow]);
+
+  const onSplitPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!narrow || panelHeight == null) return;
+    splitDrag.current = { pointer: event.pointerId, startY: event.clientY, startHeight: panelHeight };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* The drag still tracks while the pointer stays on the handle. */
+    }
+  };
+
+  const onSplitPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = splitDrag.current;
+    const grid = studyRef.current;
+    if (!drag || drag.pointer !== event.pointerId || !grid) return;
+    setPanelHeight(clampPanel(grid.clientHeight, drag.startHeight - (event.clientY - drag.startY)));
+  };
+
+  const onSplitPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (splitDrag.current?.pointer === event.pointerId) splitDrag.current = null;
+  };
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -259,26 +343,48 @@ export function AppShell() {
           </div>
         )}
         {view === 'portrait' && (
-          <div className="study-grid">
+          <div className="study-grid" ref={studyRef}>
             <div className="study-picture">
               <Portrait />
             </div>
-            <aside className="study-side">
+            <div
+              className="study-split"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize panels"
+              aria-valuemin={124}
+              aria-valuenow={panelHeight ?? undefined}
+              tabIndex={0}
+              onPointerDown={onSplitPointerDown}
+              onPointerMove={onSplitPointerMove}
+              onPointerUp={onSplitPointerUp}
+              onPointerCancel={onSplitPointerUp}
+              onKeyDown={(event) => {
+                if (!narrow || panelHeight == null || !studyRef.current) return;
+                const step = event.key === 'ArrowUp' ? 28 : event.key === 'ArrowDown' ? -28 : 0;
+                if (!step) return;
+                event.preventDefault();
+                setPanelHeight(clampPanel(studyRef.current.clientHeight, panelHeight + step));
+              }}
+            />
+            <aside className="study-side" style={narrow && panelHeight != null ? { height: panelHeight } : undefined}>
               <div className="tabs">
-                <button type="button" className={studyTab === 'system' ? 'current' : ''} onClick={() => setStudyTab('system')}>
+                <button type="button" className={studyTab === 'system' ? 'current' : ''} onClick={() => openStudyTab('system')}>
                   System
                 </button>
-                <button type="button" className={studyTab === 'picture' ? 'current' : ''} onClick={() => setStudyTab('picture')}>
+                <button type="button" className={studyTab === 'picture' ? 'current' : ''} onClick={() => openStudyTab('picture')}>
                   Visualization
                 </button>
-                <button type="button" className={studyTab === 'notes' ? 'current' : ''} onClick={() => setStudyTab('notes')}>
+                <button type="button" className={studyTab === 'notes' ? 'current' : ''} onClick={() => openStudyTab('notes')}>
                   Notes
                 </button>
               </div>
-              <div className="side-body">
-                {studyTab === 'system' && <EquationPanel />}
-                {studyTab === 'picture' && <Visualization />}
-                {studyTab === 'notes' && <Notes />}
+              <div className="side-scroll" ref={sideScrollRef}>
+                <div className="side-body">
+                  {studyTab === 'system' && <EquationPanel />}
+                  {studyTab === 'picture' && <Visualization />}
+                  {studyTab === 'notes' && <Notes />}
+                </div>
               </div>
             </aside>
           </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CompiledSystem, PolarCanvasProps } from '../core/types';
 import { PALETTE, equilibriumColor } from '../core/palette';
 import { matchesFocus } from '../core/focus';
@@ -413,6 +413,7 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
   const curvesRef = useRef(curves.pieces);
   const arrowRef = useRef(arrows);
   const lyapunovRef = useRef(lyapunovLevels);
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
   viewRef.current = view;
   curvesRef.current = curves.pieces;
   arrowRef.current = arrows;
@@ -420,13 +421,11 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
 
   const palette = PALETTE[props.theme];
 
-  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const traceAt = (clientX: number, clientY: number) => {
     const wrap = wrapRef.current;
-    if (!wrap || event.button !== 0) return;
+    if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
-    const sx = event.clientX - rect.left;
-    const sy = event.clientY - rect.top;
-    const [r, theta] = screenToWorld(view, sx, sy);
+    const [r, theta] = screenToWorld(view, clientX - rect.left, clientY - rect.top);
     props.onTracePolar(Math.max(0, r), Math.atan2(Math.sin(theta), Math.cos(theta)));
   };
 
@@ -434,8 +433,20 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     <div
       ref={wrapRef}
       className="relative h-full w-full overflow-hidden"
-      style={{ background: palette.bg, touchAction: 'none' }}
-      onPointerDown={onPointerDown}
+      style={{ background: palette.bg, touchAction: 'pan-y' }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        pressRef.current = { x: event.clientX, y: event.clientY };
+      }}
+      onPointerUp={(event) => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (!press || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6) return;
+        traceAt(event.clientX, event.clientY);
+      }}
+      onPointerCancel={() => {
+        pressRef.current = null;
+      }}
       onDoubleClick={() => setBounds({ rMin: 0, rMax: radius, thMin: -Math.PI, thMax: Math.PI })}
       onWheel={(event) => {
         event.preventDefault();

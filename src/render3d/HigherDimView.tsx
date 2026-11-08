@@ -342,7 +342,7 @@ function TimeSeriesChart({
           </button>
         ))}
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Time series" style={{ background: 'transparent', touchAction: 'none' }} onPointerDown={seek} onPointerMove={(event) => { if (event.buttons === 1) seek(event); }}>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Time series" style={{ background: 'transparent', touchAction: 'pan-y' }} onPointerDown={seek} onPointerMove={(event) => { if (event.buttons === 1) seek(event); }}>
         <line x1={pad.l} y1={yOf(0)} x2={width - pad.r} y2={yOf(0)} stroke={palette.axis} strokeOpacity={0.45} />
         <line x1={xOf(0)} y1={pad.t} x2={xOf(0)} y2={height - pad.b} stroke={palette.axis} strokeOpacity={0.45} />
         <text x={pad.l} y={height - 6} fill={palette.muted} fontSize={18}>t</text>

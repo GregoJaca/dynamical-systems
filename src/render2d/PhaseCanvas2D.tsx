@@ -431,10 +431,31 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     x: number;
     y: number;
     moved: boolean;
+    decided: boolean;
     viewport: ViewportBounds;
     cx: number;
     cy: number;
   } | null>(null);
+  const scrollsRef = useRef(false);
+  const [scrolls, setScrolls] = useState(false);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const scroller = wrap.closest('.study-picture');
+    if (!(scroller instanceof HTMLElement)) return;
+    const update = () => {
+      const next = scroller.scrollHeight > scroller.clientHeight + 16;
+      scrollsRef.current = next;
+      setScrolls(next);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    const page = scroller.firstElementChild;
+    if (page) observer.observe(page);
+    update();
+    return () => observer.disconnect();
+  }, []);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -449,16 +470,19 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
       props.flowMap.active &&
       view === layout.main &&
       Math.hypot(wx - props.flowMap.cx, wy - props.flowMap.cy) <= props.flowMap.radius * 1.15;
+    const touch = event.pointerType === 'touch';
+    const decided = !touch || !scrollsRef.current;
     dragRef.current = {
       kind: insideDroplet ? 'droplet' : 'pan',
       x: event.clientX,
       y: event.clientY,
       moved: false,
+      decided,
       viewport: props.analysis.viewport,
       cx: props.flowMap.cx,
       cy: props.flowMap.cy,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (decided) event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -471,6 +495,15 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     if (drag) {
       const dx = event.clientX - drag.x;
       const dy = event.clientY - drag.y;
+      if (!drag.decided) {
+        if (Math.hypot(dx, dy) < 8) return;
+        if (scrollsRef.current && Math.abs(dy) >= Math.abs(dx)) {
+          dragRef.current = null;
+          return;
+        }
+        drag.decided = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
       if (Math.hypot(dx, dy) > 4) drag.moved = true;
       const view = layout.main;
       if (drag.kind === 'droplet') {
@@ -519,10 +552,13 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     <div
       ref={wrapRef}
       className="relative h-full w-full overflow-hidden"
-      style={{ background: palette.bg, touchAction: 'none', cursor: 'grab' }}
+      style={{ background: palette.bg, touchAction: scrolls ? 'pan-y' : 'none', cursor: 'grab' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={() => {
+        dragRef.current = null;
+      }}
       onPointerLeave={() => props.onHoverObject(null)}
       onDoubleClick={() => props.onResetViewport()}
     >

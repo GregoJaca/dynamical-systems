@@ -51,7 +51,7 @@ export function PhaseLine1D(props: PhaseLine1DProps) {
     <div
       ref={wrapRef}
       className="relative h-full w-full"
-      style={{ background: palette.bg, touchAction: 'none' }}
+      style={{ background: palette.bg, touchAction: 'pan-y' }}
       onPointerDown={(event) => {
         const rect = wrapRef.current?.getBoundingClientRect();
         const canvas = canvasRef.current;

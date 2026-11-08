@@ -1,6 +1,6 @@
 import type { ViewportBounds } from '../core/types';
 
-/** CSS-pixel rectangle that maps a world window with isotropic scale. */
+/** CSS-pixel rectangle that shows a world window. */
 export interface ViewRect {
   left: number;
   top: number;
@@ -23,22 +23,17 @@ export function makeView(
   width: number,
   height: number,
 ): ViewRect {
-  const worldW = Math.max(1e-12, bounds.xMax - bounds.xMin);
-  const worldH = Math.max(1e-12, bounds.yMax - bounds.yMin);
-  const sx = width / worldW;
-  const sy = height / worldH;
-  const scale = Math.min(sx, sy);
-  const usedW = worldW * scale;
-  const usedH = worldH * scale;
+  const xSpan = bounds.xMax - bounds.xMin;
+  const ySpan = bounds.yMax - bounds.yMin;
   return {
-    left: left + (width - usedW) / 2,
-    top: top + (height - usedH) / 2,
-    width: Math.max(1, usedW),
-    height: Math.max(1, usedH),
+    left,
+    top,
+    width: Math.max(1, width),
+    height: Math.max(1, height),
     xMin: bounds.xMin,
-    xMax: bounds.xMax,
+    xMax: xSpan > 1e-9 ? bounds.xMax : bounds.xMin + 1e-6,
     yMin: bounds.yMin,
-    yMax: bounds.yMax,
+    yMax: ySpan > 1e-9 ? bounds.yMax : bounds.yMin + 1e-6,
   };
 }
 
