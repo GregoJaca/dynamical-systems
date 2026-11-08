@@ -18,12 +18,15 @@ export function computeManifolds(
   compiled: CompiledSystem,
   equilibria: EquilibriumAnalysis[],
   viewport: ViewportBounds,
+  hamiltonianExpr?: string,
 ): ManifoldBranch[] {
   if (spec.dimension !== 2 || spec.stateVars.length < 2) return [];
   const branches: ManifoldBranch[] = [];
   for (const eq of equilibria) {
     const real = realDirections(eq);
     if (real.length < 2) continue;
+    const saddle = real.some((direction) => direction.re > 1e-7) && real.some((direction) => direction.re < -1e-7);
+    const level = saddle && hamiltonianExpr ? energyLevel(hamiltonianExpr, spec.stateVars, compiled.parameterValues, eq.coords) : undefined;
     for (const tangent of real) {
       const transverse = real.find((other) => other !== tangent);
       if (!transverse) continue;
@@ -36,7 +39,7 @@ export function computeManifolds(
       if (!series) continue;
       const signs: Array<1 | -1> = [1, -1];
       for (const sign of signs) {
-        const points = traceBranch(compiled, eq, tangent.vector, sign, kind, viewport, equilibria);
+        const points = traceBranch(compiled, eq, tangent.vector, sign, kind, viewport, equilibria, level);
         const length = polylineLength(points);
         branches.push({
           id: `${eq.id}-${kind}-${sign > 0 ? 'p' : 'm'}`,
@@ -335,12 +338,13 @@ function traceBranch(
   kind: 'Ws' | 'Wu' | 'Wc',
   viewport: ViewportBounds,
   equilibria: EquilibriumAnalysis[],
+  project?: (y: number[]) => void,
 ): number[][] {
   const epsilon = 1e-4;
   const seed = eq.coords.map((value, index) => value + sign * epsilon * (direction[index] ?? 0));
+  if (project) project(seed);
   const span = Math.max(viewport.xMax - viewport.xMin, viewport.yMax - viewport.yMin, 1);
-  const time = kind === 'Ws' ? -180 : 180;
-  const targets = equilibria.filter((other) => other.id !== eq.id);
+  const time = kind === 'Ws' ? -220 : 220;
   const result = integrateRK45({
     t0: 0,
     t1: time,
@@ -352,16 +356,65 @@ function traceBranch(
     maxSteps: 12_000,
     viewport,
     viewportMargin: 1.2,
-    equilibria: targets.map((other) => ({ id: other.id, coords: other.coords })),
+    equilibria: equilibria.map((other) => ({ id: other.id, coords: other.coords })),
     equilibriumRadius: Math.max(0.03, span * 0.02),
     velocityStop: 1e-3,
+    departDistance: 0.2,
+    project,
     sampleDistance: Math.max(span / 180, 0.015),
     blowUpRadius: 1e4,
   });
   const points = [eq.coords.slice(), ...result.y];
-  const arrival = targets.find((other) => other.id === result.equilibriumId);
+  const arrival = equilibria.find((other) => other.id === result.equilibriumId);
   if (arrival) points.push(arrival.coords.slice());
   return dedupePoints(points);
+}
+
+/** Newton correction onto the Hamiltonian level through an equilibrium. A saddle separatrix stays on that level; without it the numerical branch peels into a nearby center. */
+function energyLevel(
+  expr: string,
+  vars: string[],
+  params: Record<string, number>,
+  point: number[],
+): ((y: number[]) => void) | undefined {
+  let code: { evaluate: (scope: Record<string, number>) => unknown };
+  try {
+    code = parse(expr).compile();
+  } catch {
+    return undefined;
+  }
+  const valueAt = (y: number[]): number | null => {
+    const scope: Record<string, number> = { ...params };
+    vars.forEach((name, index) => {
+      scope[name] = y[index] ?? 0;
+    });
+    const value = Number(code.evaluate(scope));
+    return Number.isFinite(value) ? value : null;
+  };
+  const target = valueAt(point);
+  if (target === null) return undefined;
+  return (y: number[]) => {
+    for (let pass = 0; pass < 5; pass += 1) {
+      const current = valueAt(y);
+      if (current === null) return;
+      const excess = current - target;
+      if (Math.abs(excess) < 1e-12) return;
+      const step = 1e-6;
+      const gradient = y.map((_, index) => {
+        const plus = y.slice();
+        const minus = y.slice();
+        plus[index] = (plus[index] ?? 0) + step;
+        minus[index] = (minus[index] ?? 0) - step;
+        const high = valueAt(plus);
+        const low = valueAt(minus);
+        if (high === null || low === null) return 0;
+        return (high - low) / (2 * step);
+      });
+      const scale = gradient.reduce((sum, component) => sum + component * component, 0);
+      if (scale < 1e-16) return;
+      for (let index = 0; index < y.length; index += 1) y[index] = (y[index] ?? 0) - ((gradient[index] ?? 0) * excess) / scale;
+    }
+  };
 }
 
 function dedupePoints(points: number[][]): number[][] {

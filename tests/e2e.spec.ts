@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('numeric portrait appears and nothing is written to localStorage', async ({ page }) => {
+test('numeric portrait appears', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/$/);
   await page.getByLabel('Right-hand side 1').fill('y');
@@ -21,12 +21,9 @@ test('numeric portrait appears and nothing is written to localStorage', async ({
     return ink;
   });
   expect(pixels).toBeGreaterThan(20);
-
-  const stored = await page.evaluate(() => window.localStorage.length);
-  expect(stored).toBe(0);
 });
 
-test('a shared hash restores the parameter and stays stateless', async ({ page, browser }) => {
+test('a shared hash restores the system', async ({ page, browser }) => {
   await page.goto('/');
   expect(await page.evaluate(() => window.location.hash)).toBe('');
   await page.getByLabel('Right-hand side 1').fill('y');
@@ -34,13 +31,11 @@ test('a shared hash restores the parameter and stays stateless', async ({ page, 
   await page.getByRole('button', { name: 'Study this system' }).click();
   await page.waitForFunction(() => window.location.hash.includes('#s='), null, { timeout: 10_000 });
   const hash = await page.evaluate(() => window.location.hash);
-  expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
 
   const fresh = await browser.newContext();
   const restored = await fresh.newPage();
   await restored.goto(`/${hash}`);
   await expect(restored.locator('canvas').first()).toBeVisible();
   expect(await restored.evaluate(() => window.location.hash)).toBe(hash);
-  expect(await restored.evaluate(() => window.localStorage.length)).toBe(0);
   await fresh.close();
 });

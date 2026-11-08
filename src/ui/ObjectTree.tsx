@@ -167,6 +167,8 @@ export function ObjectTree() {
   const placed = analysis.streamlines.filter((segment) => segment.category === 'user_traced');
   const stableManifolds = analysis.manifolds.filter((branch) => branch.kind !== 'Wc');
   const centerManifolds = analysis.manifolds.filter((branch) => branch.kind === 'Wc');
+  const centerSurfaces = analysis.manifoldSurfaces.filter((surface) => surface.kind === 'Wc');
+  const connections = analysis.manifolds.filter((branch) => branch.connectionType);
   const subspaces = analysis.equilibria.flatMap((eq) => eq.subspaces.map((space) => ({ eq, space })));
   const isolatedCycles = analysis.limitCycles.length > 0 && analysis.limitCycles.length <= 6;
   const showPlane = spec.dimension === 2;
@@ -270,9 +272,24 @@ export function ObjectTree() {
         </Block>
       )}
 
-      {centerManifolds.length > 0 && (
+      {(centerManifolds.length > 0 || centerSurfaces.length > 0) && (
         <Block>
           <LayerRow title="Center manifold" on={layers.centerManifoldWc} dashed={false} color={palette.wc} focus="group:center" onToggle={toggle('centerManifoldWc')} />
+          {centerSurfaces.map((surface) => {
+            const home = analysis.equilibria.find((eq) => eq.id === surface.equilibriumId);
+            return (
+            <Row
+              key={surface.id}
+              id={surface.id}
+              label={`Wc of ${home ? where(home) : ''}`}
+              formula={surface.formulaLatex || surface.reducedDynamicsLatex || ''}
+              color={palette.wc}
+              dashed={false}
+              shown={layers.centerManifoldWc && !hiddenIds.includes(surface.id)}
+              onToggle={reveal('centerManifoldWc', surface.id)}
+            />
+            );
+          })}
           {groupRows(centerManifolds).map((branches) => {
             const first = branches[0]!;
             const home = analysis.equilibria.find((eq) => eq.id === first.equilibriumId);
@@ -331,6 +348,29 @@ export function ObjectTree() {
               onToggle={reveal('nullclines', curve.id)}
             />
           ))}
+        </Block>
+      )}
+
+      {connections.length > 0 && (
+        <Block>
+          <LayerRow title="Connecting orbits" on={layers.manifoldsWuWs} dashed={false} color={palette.separatrix} focus="group:connections" onToggle={toggle('manifoldsWuWs')} />
+          {connections.map((branch) => {
+            const home = analysis.equilibria.find((eq) => eq.id === branch.equilibriumId);
+            const target = analysis.equilibria.find((eq) => eq.id === branch.connectionToEquilibriumId);
+            const label = branch.connectionType === 'homoclinic' ? `Homoclinic at ${home ? where(home) : ''}` : `Heteroclinic from ${home ? where(home) : ''} to ${target ? where(target) : ''}`;
+            return (
+              <Row
+                key={branch.id}
+                id={branch.id}
+                label={label}
+                formula={branch.taylorSeriesLatex || ''}
+                color={palette.separatrix}
+                dashed={false}
+                shown={layers.manifoldsWuWs && !hiddenIds.includes(branch.id)}
+                onToggle={reveal('manifoldsWuWs', branch.id)}
+              />
+            );
+          })}
         </Block>
       )}
 

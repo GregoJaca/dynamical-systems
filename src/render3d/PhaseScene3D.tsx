@@ -1316,7 +1316,7 @@ function findAnchor(analysis: NumericAnalysis, userOrbits: StreamlineSegment[], 
   }
   for (const surface of analysis.manifoldSurfaces) {
     if (surface.id !== id) continue;
-    return { title: `${surface.kind} surface`, detail: 'invariant manifold ribbon', at: midpoint(surface.trajectories[0] ?? []) };
+    return { title: `${surface.kind} surface`, detail: surface.formulaLatex ?? surface.reducedDynamicsLatex ?? '', at: midpoint(surface.trajectories[0] ?? []) };
   }
   for (const segment of [...analysis.streamlines, ...userOrbits]) {
     if (segment.id !== id) continue;

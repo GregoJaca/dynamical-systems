@@ -188,6 +188,8 @@ export interface ManifoldSurface3D {
   trajectories: number[][][];
   vertices: number[];
   indices: number[];
+  formulaLatex?: string;
+  reducedDynamicsLatex?: string;
 }
 
 export interface BasinField {
@@ -470,6 +472,10 @@ export interface Rk45Options {
   detectPeriodic?: boolean;
   minPeriodTime?: number;
   sampleDistance?: number;
+  /** Ignore equilibrium arrival until the orbit has moved this far from the seed. */
+  departDistance?: number;
+  /** Pull the accepted state back onto an invariant, such as a Hamiltonian level. */
+  project?: (y: number[]) => void;
 }
 
 export interface Rk45Result {

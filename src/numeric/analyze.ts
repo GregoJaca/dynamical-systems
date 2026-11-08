@@ -1,10 +1,14 @@
 import { parse } from 'mathjs';
-import type { EquilibriumAnalysis, NumericAnalysis, SystemSpec } from '../core/types';
+import type { NumericAnalysis, SystemSpec } from '../core/types';
 import { compileSystemNumeric, symbolToLatex } from '../input/parser';
 import { findEquilibriaNumeric } from './equilibriaNumeric';
+import { linkConnections } from './connections';
+import { attachCenterManifolds3D } from './centerManifold3d';
 import { analyzeGlobal, cyclesFromPolar, finalizeGlobal } from './globalAnalysis';
+import { findIsolatedCycles } from './isolatedCycles';
 import { computeManifolds } from './manifolds';
 import { computeManifoldSurfaces } from './manifolds3d';
+import { poincareTheorem } from './poincareReport';
 import { computeNullclines } from './nullclines';
 import { generateCharacteristicOrbits, generateStreamlines } from './streamlines';
 import { chooseViewport } from './viewport';
@@ -26,18 +30,23 @@ export function analyzeNumeric(spec: SystemSpec): NumericAnalysis {
     stateVars: spec.stateVars,
   });
   const viewport = chooseViewport(spec, equilibria, []);
-  const manifolds = spec.dimension === 2 ? computeManifolds(spec, compiled, equilibria, viewport) : [];
+  const manifolds = spec.dimension === 2 ? computeManifolds(spec, compiled, equilibria, viewport, bundle.global.hamiltonianExpr) : [];
   linkConnections(manifolds, equilibria);
   finalizeGlobal(spec, compiled, bundle, equilibria, []);
-  const limitCycles = bundle.polar ? cyclesFromPolar(bundle.polar) : [];
+  let limitCycles = bundle.polar ? cyclesFromPolar(bundle.polar) : [];
+  if (limitCycles.length === 0 && !bundle.global.bendixsonDulac?.applies && !bundle.global.isHamiltonian && spec.dimension === 2) {
+    limitCycles = findIsolatedCycles(compiled, equilibria, viewport);
+  }
   const framed = limitCycles.length > 0 ? chooseViewport(spec, equilibria, limitCycles) : viewport;
   const streamlines =
     spec.dimension === 2
       ? generateStreamlines(compiled, framed, equilibria, manifolds)
       : generateCharacteristicOrbits(compiled, framed, equilibria);
   const nullclines = spec.dimension === 2 ? computeNullclines(compiled, framed) : [];
-  const manifoldSurfaces = spec.dimension === 3 ? computeManifoldSurfaces(compiled, equilibria, framed) : [];
-  return {
+  const hyperbolicSurfaces = spec.dimension === 3 ? computeManifoldSurfaces(compiled, equilibria, framed) : [];
+  const centerSurfaces = spec.dimension === 3 ? attachCenterManifolds3D(spec, equilibria) : [];
+  const manifoldSurfaces = [...hyperbolicSurfaces, ...centerSurfaces];
+  const analysis = {
     revision: spec.revision,
     equilibria,
     streamlines,
@@ -53,6 +62,10 @@ export function analyzeNumeric(spec: SystemSpec): NumericAnalysis {
     global: bundle.global,
     viewport: framed,
   };
+  const indexTheorem = poincareTheorem(analysis);
+  analysis.global.applicableTheorems = analysis.global.applicableTheorems.filter((theorem) => theorem.id !== 'poincare-index');
+  if (indexTheorem) analysis.global.applicableTheorems.push(indexTheorem);
+  return analysis;
 }
 
 function searchRadius(spec: SystemSpec): number {
@@ -74,17 +87,3 @@ function periodicIn(rhs: string[], variable: string): boolean {
   return rhs.some((expr) => pattern.test(expr));
 }
 
-function linkConnections(manifolds: NumericAnalysis['manifolds'], equilibria: EquilibriumAnalysis[]): void {
-  for (const branch of manifolds) {
-    const end = branch.points[branch.points.length - 1];
-    if (!end) continue;
-    for (const eq of equilibria) {
-      if (eq.id === branch.equilibriumId) continue;
-      const dist = Math.hypot(...eq.coords.map((value, index) => value - (end[index] ?? 0)));
-      if (dist < 0.08) {
-        branch.connectionToEquilibriumId = eq.id;
-        branch.connectionType = 'heteroclinic';
-      }
-    }
-  }
-}

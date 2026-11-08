@@ -42,6 +42,9 @@ export function integrateRK45(options: Rk45Options): Rk45Result {
   const velocityStop = options.velocityStop ?? 1e-6;
   const minPeriod = options.minPeriodTime ?? 0.5;
   const viewport = expandedViewport(options);
+  const departDistance = options.departDistance ?? 0;
+  const project = options.project;
+  let departed = departDistance <= 0;
 
   let yp = f(t0, y, params);
   if (!isFiniteVector(yp)) {
@@ -132,6 +135,12 @@ export function integrateRK45(options: Rk45Options): Rk45Result {
     t += h;
     for (let i = 0; i < n; i += 1) y[i] = yNew[i] ?? 0;
     yp = ypNew.slice();
+    if (project) {
+      project(y);
+      const projected = f(t, y, params);
+      if (isFiniteVector(projected)) yp = projected;
+    }
+    if (!departed && distance(y, options.y0) >= departDistance) departed = true;
     samples.push({ t, y: y.slice(), yp: yp.slice() });
     steps += 1;
     rejected = 0;
@@ -145,7 +154,7 @@ export function integrateRK45(options: Rk45Options): Rk45Result {
       status = 'viewportExit';
       break;
     }
-    if (options.equilibria && options.equilibria.length > 0) {
+    if (departed && options.equilibria && options.equilibria.length > 0) {
       const speed = norm(yp);
       if (speed < velocityStop) {
         let nearest: { id: string; dist: number } | null = null;

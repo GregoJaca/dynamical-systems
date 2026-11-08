@@ -53,7 +53,6 @@ export function EquilibriaPanel() {
                   </div>
                 ))}
               </div>
-              {eq.poincareIndex2D !== undefined && <p>Poincaré index {eq.poincareIndex2D}</p>}
               <div className="flex flex-wrap gap-1">
                 <Badge tone={eq.isHyperbolic ? 'good' : 'gold'}>{eq.isHyperbolic ? 'Hyperbolic' : 'Nonhyperbolic'}</Badge>
                 <Badge>{prettyLabel(eq.stability)}</Badge>

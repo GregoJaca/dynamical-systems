@@ -53,7 +53,6 @@ function equilibriumBlock(eq: EquilibriumAnalysis): string {
   for (const space of eq.subspaces) {
     lines.push(`$${space.cartesianFormulaLatex}$.`);
   }
-  if (eq.poincareIndex2D !== undefined) lines.push(`Poincaré index $${eq.poincareIndex2D}$.`);
   return lines.join('\n');
 }
 

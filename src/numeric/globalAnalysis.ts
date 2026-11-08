@@ -132,7 +132,7 @@ export function finalizeGlobal(
     bundle.spherical.isRecommended = free;
     bundle.spherical.recommendationReason = free ? 'The radial equation is independent of the angular coordinates.' : undefined;
   }
-  bundle.global.applicableTheorems = theorems(spec, bundle, equilibria);
+  bundle.global.applicableTheorems = theorems(bundle, equilibria);
 }
 
 function integrateHamiltonian(f1: string, f2: string, x: string, y: string): string | null {
@@ -383,9 +383,9 @@ function sphericalSkeleton(rhs: string[], vars: string[]): SphericalAnalysis {
     [z!]: '(rho * cos(theta))',
   };
   const f = rhs.map((expr) => substituteExpr(expr, map));
-  const rhoDot = `(((rho * sin(theta) * cos(phi)) * (${f[0]}) + (rho * sin(theta) * sin(phi)) * (${f[1]}) + (rho * cos(theta)) * (${f[2]})) / rho)`;
-  const thetaDot = `(((cos(theta) * cos(phi)) * (${f[0]}) + (cos(theta) * sin(phi)) * (${f[1]}) + (-sin(theta)) * (${f[2]})) / rho)`;
-  const phiDot = `(((-sin(phi)) * (${f[0]}) + (cos(phi)) * (${f[1]})) / (rho * sin(theta)))`;
+  const rhoDot = polishTrig(`(((rho * sin(theta) * cos(phi)) * (${f[0]}) + (rho * sin(theta) * sin(phi)) * (${f[1]}) + (rho * cos(theta)) * (${f[2]})) / rho)`);
+  const thetaDot = polishTrig(`(((cos(theta) * cos(phi)) * (${f[0]}) + (cos(theta) * sin(phi)) * (${f[1]}) + (-sin(theta)) * (${f[2]})) / rho)`);
+  const phiDot = polishTrig(`(((-sin(phi)) * (${f[0]}) + (cos(phi)) * (${f[1]})) / (rho * sin(theta)))`);
   return {
     isRecommended: false,
     rhoDotLatex: `\\dot\\rho = ${expressionToDisplay(rhoDot, ['rho', 'theta', 'phi'])}`,
@@ -423,9 +423,9 @@ function polishTrig(expr: string): string {
 
 function agrees(original: string, reduced: string): boolean {
   const samples = [
-    { r: 0.4, theta: 0.3, mu: 0.5, rho: 0.8, z: -0.2 },
-    { r: 1.2, theta: 1.4, mu: 1, rho: 1.5, z: 0.7 },
-    { r: 2.5, theta: -0.8, mu: -0.4, rho: 2, z: 1.1 },
+    { r: 0.4, theta: 0.3, phi: 0.5, mu: 0.5, rho: 0.8, z: -0.2 },
+    { r: 1.2, theta: 1.4, phi: 1.1, mu: 1, rho: 1.5, z: 0.7 },
+    { r: 2.5, theta: -0.8, phi: -0.4, mu: -0.4, rho: 2, z: 1.1 },
   ];
   try {
     const left = compile(original);
@@ -618,7 +618,7 @@ function analyzeLyapunov(spec: SystemSpec, compiled: CompiledSystem, hamiltonian
   return undefined;
 }
 
-function theorems(spec: SystemSpec, bundle: GlobalBundle, equilibria: EquilibriumAnalysis[]): ApplicableTheorem[] {
+function theorems(bundle: GlobalBundle, equilibria: EquilibriumAnalysis[]): ApplicableTheorem[] {
   const items: ApplicableTheorem[] = [];
   if (equilibria.some((eq) => eq.isHyperbolic)) {
     items.push({
@@ -681,15 +681,6 @@ function theorems(spec: SystemSpec, bundle: GlobalBundle, equilibria: Equilibriu
       perkoReference: 'Perko §2.10',
       statementLatex: 'A linear center on the fixed set of a reversing symmetry is a nonlinear center.',
       applicationToSystemLatex: 'Reversibility upgrades the linear center to a true nonlinear center.',
-    });
-  }
-  if (spec.dimension === 2) {
-    items.push({
-      id: 'poincare-index',
-      name: 'Poincaré index theorem',
-      perkoReference: 'Perko §3.12',
-      statementLatex: 'The index of a closed curve equals the sum of the indices of the equilibria it encloses.',
-      applicationToSystemLatex: 'Each hyperbolic saddle has index −1 and each hyperbolic node or focus has index +1.',
     });
   }
   return items;

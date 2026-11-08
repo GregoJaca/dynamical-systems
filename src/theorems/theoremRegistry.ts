@@ -4,6 +4,7 @@ import type {
   NumericAnalysis,
   SymmetryInfo,
 } from '../core/types';
+import { poincareTheorem } from '../numeric/poincareReport';
 
 export interface TheoremContext {
   isAutonomous?: boolean;
@@ -248,22 +249,9 @@ export function applicableTheorems(analysis: NumericAnalysis, context?: TheoremC
     );
   }
 
-  if (autonomous && dimension === 2 && analysis.equilibria.length > 0) {
-    const indexed = analysis.equilibria
-      .filter((eq) => eq.poincareIndex2D !== undefined)
-      .slice(0, 6)
-      .map((eq) => `${equilibriumLatex(eq)}\\ (I = ${eq.poincareIndex2D})`);
-    results.push(
-      theorem(
-        'poincare-index',
-        'Poincaré Index Theorem',
-        'Perko §3.12',
-        'The Poincaré index of a closed orbit is $+1$, and it equals the sum of the indices of the equilibria in its interior. A saddle has index $-1$; a node, focus, or center has index $+1$; a cusp or saddle-node has index $0$.',
-        indexed.length > 0
-          ? `Computed indices: ${indexed.map((item) => tex(item)).join(', ')}.`
-          : `The theorem constrains every periodic orbit of this planar system by the equilibria ${tex(listEquilibria(analysis.equilibria))}.`,
-      ),
-    );
+  if (autonomous && dimension === 2) {
+    const indexTheorem = poincareTheorem(analysis);
+    if (indexTheorem) results.push(indexTheorem);
   }
 
   return results;

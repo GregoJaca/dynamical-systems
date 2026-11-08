@@ -29,7 +29,7 @@ export function directScene(analysis: NumericAnalysis, current: LayerVisibility)
     next.manifoldsWuWs = true;
     next.separatrices = true;
   }
-  if (equilibria.some((eq) => !eq.isHyperbolic)) {
+  if (analysis.manifolds.some((branch) => branch.kind === 'Wc') || analysis.manifoldSurfaces.some((surface) => surface.kind === 'Wc')) {
     next.centerManifoldWc = true;
   }
   if (analysis.global.isHamiltonian) {

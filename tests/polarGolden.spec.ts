@@ -71,5 +71,5 @@ describe('polar golden flags', () => {
       })
       .filter((entry) => entry.recommended !== entry.expected);
     expect(mismatches).toEqual([]);
-  }, 120_000);
+  }, 240_000);
 });

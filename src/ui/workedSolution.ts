@@ -1,4 +1,5 @@
 import type { EquilibriumAnalysis, NumericAnalysis, SystemSpec } from '../core/types';
+import { poincareIndexLatex, poincareIsRelevant } from '../numeric/poincareReport';
 import { complexLatex, coordList, matrixLatex, prettyLabel, rationalLabel, vectorLatex } from './format';
 
 export interface SolutionSection {
@@ -19,7 +20,6 @@ function equilibriumBlock(eq: EquilibriumAnalysis): string {
     eq.eigenvectors.length
       ? `Eigenvectors: ${eq.eigenvectors.map((vector) => `\\(${vectorLatex(vector)}\\)`).join(', ')}.`
       : '',
-    eq.poincareIndex2D !== undefined ? `Poincaré index \\(${eq.poincareIndex2D}\\).` : '',
     `Classification: ${prettyLabel(eq.classification2D ?? eq.classification3D)}. Stability: ${prettyLabel(eq.stability)}.`,
     eq.stabilityReasonLatex ?? '',
     ...eq.subspaces.map((space) => `\\[${space.cartesianFormulaLatex}\\]`),
@@ -40,18 +40,29 @@ export function workedSections(spec: SystemSpec, analysis: NumericAnalysis): Sol
       latex: analysis.equilibria.map((eq) => equilibriumBlock(eq)).join('\n\n'),
     });
   }
+  if (poincareIsRelevant(analysis)) {
+    sections.push({ title: 'Poincaré indices', latex: `\\[${poincareIndexLatex(analysis.equilibria)}\\]` });
+  }
+  const surfaces = analysis.manifoldSurfaces.filter((surface) => surface.formulaLatex || surface.reducedDynamicsLatex);
   const manifolds = analysis.manifolds.filter((branch) => branch.taylorSeriesLatex || branch.reducedDynamicsLatex);
-  if (manifolds.length) {
-    sections.push({
-      title: 'Invariant manifolds',
-      latex: manifolds
-        .map((branch) =>
-          [branch.taylorSeriesLatex ? `\\[${branch.taylorSeriesLatex}\\]` : '', branch.reducedDynamicsLatex ? `\\[${branch.reducedDynamicsLatex}\\]` : '']
-            .filter(Boolean)
-            .join('\n'),
-        )
-        .join('\n\n'),
-    });
+  const manifoldLatex = [
+    ...manifolds.map((branch) =>
+      [
+        branch.connectionType ? `${branch.connectionType === 'homoclinic' ? 'Homoclinic' : 'Heteroclinic'} orbit.` : '',
+        branch.taylorSeriesLatex ? `\\[${branch.taylorSeriesLatex}\\]` : '',
+        branch.reducedDynamicsLatex ? `\\[${branch.reducedDynamicsLatex}\\]` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    ),
+    ...surfaces.map((surface) =>
+      [surface.formulaLatex ? `\\[${surface.formulaLatex}\\]` : '', surface.reducedDynamicsLatex ? `\\[${surface.reducedDynamicsLatex}\\]` : '']
+        .filter(Boolean)
+        .join('\n'),
+    ),
+  ].filter(Boolean);
+  if (manifoldLatex.length) {
+    sections.push({ title: 'Invariant manifolds', latex: manifoldLatex.join('\n\n') });
   }
   const globalBits = [
     analysis.global.divergenceLatex ? `\\[\\nabla\\cdot f = ${analysis.global.divergenceLatex}\\]` : '',
