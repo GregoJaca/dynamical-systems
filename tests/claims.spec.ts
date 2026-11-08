@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { exampleToSpec, PERKO_EXAMPLES } from '../src/examples/perkoExamples';
 import { latexNumber, polynomialSign, toPolynomial } from '../src/numeric/algebra';
-import { analyzeNumeric } from '../src/numeric/analyze';
 import { normalize } from '../src/numeric/linearAlgebra';
+import { light, withManifolds } from './light';
 
 describe('claims that have to be exact', () => {
   it('recognizes a negative definite quadratic form with a cross term', () => {
@@ -12,18 +11,13 @@ describe('claims that have to be exact', () => {
   });
 
   it('keeps the Jordan Lyapunov function and does not invent one for the saddle', () => {
-    const jordan = PERKO_EXAMPLES.find((example) => example.id === 'jordan-node');
-    const saddle = PERKO_EXAMPLES.find((example) => example.id === 'saddle-separatrix');
-    if (!jordan || !saddle) throw new Error('missing example');
-    expect(analyzeNumeric(exampleToSpec(jordan)).global.lyapunov?.classification).toBe('strict_lyapunov');
-    const saddleKind = analyzeNumeric(exampleToSpec(saddle)).global.lyapunov?.classification;
+    expect(light('jordan-node').bundle.global.lyapunov?.classification).toBe('strict_lyapunov');
+    const saddleKind = light('saddle-separatrix').bundle.global.lyapunov?.classification;
     expect(saddleKind === 'strict_lyapunov' || saddleKind === 'weak_lyapunov_lasalle').toBe(false);
-  }, 60_000);
+  });
 
   it('writes the saddle separatrix as y = x^2/3', () => {
-    const example = PERKO_EXAMPLES.find((item) => item.id === 'saddle-separatrix');
-    if (!example) throw new Error('missing example');
-    const formulas = analyzeNumeric(exampleToSpec(example)).manifolds.map((branch) => branch.taylorSeriesLatex).join(' ');
+    const formulas = withManifolds('saddle-separatrix').manifolds.map((branch) => branch.taylorSeriesLatex).join(' ');
     expect(formulas).toContain('\\frac{1}{3}');
     expect(formulas).toContain('x^{2}');
     expect(formulas).not.toContain('v =');

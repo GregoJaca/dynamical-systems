@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { exampleToSpec, PERKO_EXAMPLES } from '../src/examples/perkoExamples';
-import { analyzeNumeric } from '../src/numeric/analyze';
+import { PERKO_EXAMPLES } from '../src/examples/perkoExamples';
+import { light } from './light';
 
 // Planar polar chart (r horizontal, θ in [-π, π]), not the numeric recommender.
 // True only when a student would switch to polar: circles, spirals, or a limit cycle
@@ -66,10 +66,10 @@ describe('polar golden flags', () => {
   it('recommends the polar chart exactly on that list', () => {
     const mismatches = PERKO_EXAMPLES.filter((example) => example.dimension === 2)
       .map((example) => {
-        const recommended = analyzeNumeric(exampleToSpec(example)).coordinateTransforms.polar2D?.isRecommended === true;
+        const recommended = light(example.id).bundle.polar?.isRecommended === true;
         return { id: example.id, recommended, expected: example.groundTruth?.polarRecommended === true };
       })
       .filter((entry) => entry.recommended !== entry.expected);
     expect(mismatches).toEqual([]);
-  }, 240_000);
+  });
 });

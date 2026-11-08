@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { exampleById, exampleToSpec } from '../src/examples/perkoExamples';
-import { compileSystemNumeric } from '../src/input/parser';
 import { algebraicMath, latexNumber } from '../src/numeric/algebra';
-import { analyzeGlobal, cyclesFromPolar, finalizeGlobal } from '../src/numeric/globalAnalysis';
+import { cyclesFromPolar } from '../src/numeric/globalAnalysis';
 import { complexLatex } from '../src/ui/format';
 import { reduceTrigPolynomial } from '../src/numeric/trigReduce';
-import { findEquilibriaNumeric } from '../src/numeric/equilibriaNumeric';
 import { decompose } from '../src/numeric/linearAlgebra';
-import type { EquilibriumAnalysis, PolarAnalysis, SystemSpec } from '../src/core/types';
+import type { EquilibriumAnalysis, PolarAnalysis } from '../src/core/types';
+import { light } from './light';
 
 describe('exact printed forms', () => {
   it('prints quadratic irrationals, square roots, and multiples of π', () => {
@@ -110,50 +108,28 @@ describe('exact printed forms', () => {
   it('rejects a limit cycle read off one angle of a theta-dependent field', () => {
     expect(cyclesFromPolar(study('exam-10').polar!)).toHaveLength(0);
     expect(cyclesFromPolar(study('exam-19').polar!)).toHaveLength(0);
-    expect(cyclesFromPolar(study('hopf').polar!).some((cycle) => Math.abs((cycle.radius ?? 0) - 1) < 1e-3)).toBe(true);
+    const hopfCycles = cyclesFromPolar(study('hopf').polar!);
+    const unit = hopfCycles.find((cycle) => Math.abs((cycle.radius ?? 0) - 1) < 1e-3);
+    expect(unit).toBeTruthy();
+    for (const point of unit?.points ?? []) {
+      expect(Math.abs((point[0] ?? 0) ** 2 + (point[1] ?? 0) ** 2 - 1)).toBeLessThan(1e-9);
+    }
+    const samples = unit?.points ?? [];
+    for (let index = 1; index < samples.length; index += 1) {
+      const left = samples[index - 1] ?? [];
+      const right = samples[index] ?? [];
+      const chord = Math.hypot((right[0] ?? 0) - (left[0] ?? 0), (right[1] ?? 0) - (left[1] ?? 0));
+      const gap = 1 - Math.sqrt(Math.max(0, 1 - (chord / 2) ** 2));
+      expect(gap).toBeLessThan(6e-4);
+    }
   });
 });
 
 function study(id: string): { polar?: PolarAnalysis; equilibria: EquilibriumAnalysis[] } {
-  const example = exampleById(id);
-  if (!example) throw new Error(`missing ${id}`);
-  const spec = exampleToSpec(example);
-  const compiled = compileSystemNumeric(spec);
-  const bundle = analyzeGlobal(spec, compiled);
-  const equilibria = findEquilibriaNumeric({
-    compiled,
-    dimension: spec.dimension,
-    isLinear: spec.isLinear,
-    hamiltonian: bundle.global.isHamiltonian,
-    reversibleFix: bundle.reversibleFix,
-    variableLatex: spec.stateVars,
-    periodicVars: periodicFlags(spec),
-    searchRadius: 12,
-    rhsExpressions: spec.rhsExpressions,
-    stateVars: spec.stateVars,
-  });
-  finalizeGlobal(spec, compiled, bundle, equilibria, []);
-  return { polar: bundle.polar, equilibria };
+  const loaded = light(id);
+  return { polar: loaded.bundle.polar, equilibria: loaded.equilibria };
 }
 
 function equilibriaOf(id: string): EquilibriumAnalysis[] {
-  const example = exampleById(id);
-  if (!example) throw new Error(`missing ${id}`);
-  const spec = exampleToSpec(example);
-  return findEquilibriaNumeric({
-    compiled: compileSystemNumeric(spec),
-    dimension: spec.dimension,
-    isLinear: spec.isLinear,
-    hamiltonian: false,
-    reversibleFix: { xAxis: false, yAxis: false },
-    variableLatex: spec.stateVars,
-    periodicVars: periodicFlags(spec),
-    searchRadius: 12,
-    rhsExpressions: spec.rhsExpressions,
-    stateVars: spec.stateVars,
-  });
-}
-
-function periodicFlags(spec: SystemSpec): boolean[] {
-  return spec.stateVars.map((name) => spec.rhsExpressions.some((expr) => new RegExp(`\\b(sin|cos|tan)\\(\\s*${name}\\b`).test(expr)));
+  return light(id).equilibria;
 }

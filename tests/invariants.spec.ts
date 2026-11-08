@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { compile, type EvalFunction } from 'mathjs';
 import { exampleToSpec, PERKO_EXAMPLES } from '../src/examples/perkoExamples';
 import { compileSystemNumeric } from '../src/input/parser';
-import { analyzeNumeric } from '../src/numeric/analyze';
+import { cyclesFromPolar } from '../src/numeric/globalAnalysis';
 import { integrateRK45 } from '../src/numeric/rk45';
+import { light, withManifolds } from './light';
 import type { EquilibriumAnalysis, NumericAnalysis, SystemSpec } from '../src/core/types';
 
 function byId(id: string) {
@@ -12,9 +13,22 @@ function byId(id: string) {
   return example;
 }
 
-function analyzeId(id: string): { spec: SystemSpec; analysis: NumericAnalysis } {
-  const spec = exampleToSpec(byId(id));
-  return { spec, analysis: analyzeNumeric(spec) };
+function analyzeId(id: string) {
+  const study = light(id);
+  return {
+    spec: study.spec,
+    compiled: study.compiled,
+    analysis: {
+      equilibria: study.equilibria,
+      global: study.bundle.global,
+      limitCycles: study.bundle.polar ? cyclesFromPolar(study.bundle.polar) : [],
+      coordinateTransforms: {
+        polar2D: study.bundle.polar,
+        cylindrical3D: study.bundle.cylindrical,
+        spherical3D: study.bundle.spherical,
+      },
+    },
+  };
 }
 
 function near(coords: number[], target: number[], tol = 1e-5): boolean {
@@ -56,13 +70,12 @@ describe('integrator', () => {
 describe('equilibrium invariants', () => {
   it.each(PERKO_EXAMPLES.map((example) => [example.id, example] as const))(
     '%s has tiny residuals, a consistent spectrum, and a coherent 2D index',
-    (_id, example) => {
-      const spec = exampleToSpec(example);
-      const analysis = analyzeNumeric(spec);
-      expect(analysis.revision).toBe(spec.revision);
-      expect(analysis.equilibria.length).toBeGreaterThan(0);
+    (id) => {
+      const spec = exampleToSpec(byId(String(id)));
+      const study = light(String(id));
+      expect(study.equilibria.length).toBeGreaterThan(0);
 
-      for (const eq of analysis.equilibria) {
+      for (const eq of study.equilibria) {
         expect(residualInf(spec, eq.coords)).toBeLessThan(1e-8);
         const trace = eq.jacobianNumeric.reduce((sum, row, index) => sum + (row[index] ?? 0), 0);
         expect(eq.eigenvalues.reduce((sum, lambda) => sum + lambda.re, 0)).toBeCloseTo(trace, 8);
@@ -87,7 +100,8 @@ describe('equilibrium invariants', () => {
 
 describe('canonical phase portraits', () => {
   it('finds the curved unstable manifold of the hyperbolic saddle', () => {
-    const { analysis } = analyzeId('saddle-separatrix');
+    const study = withManifolds('saddle-separatrix');
+    const analysis = { equilibria: study.equilibria, manifolds: study.manifolds };
     expect(hasEquilibrium(analysis.equilibria, [0, 0])).toBe(true);
     const origin = analysis.equilibria.find((eq) => near(eq.coords, [0, 0]))!;
     expect(origin.classification2D).toBe('saddle');
@@ -180,7 +194,8 @@ describe('canonical phase portraits', () => {
   });
 
   it('reduces the asymptotically stable center manifold', () => {
-    const { analysis } = analyzeId('center-manifold-stable');
+    const study = withManifolds('center-manifold-stable');
+    const analysis = { equilibria: study.equilibria, manifolds: study.manifolds };
     const origin = analysis.equilibria.find((eq) => near(eq.coords, [0, 0]))!;
     expect(origin.stability).toBe('asymptotically_stable');
     const center = analysis.manifolds.find((branch) => branch.kind === 'Wc' && branch.equilibriumId === origin.id);
