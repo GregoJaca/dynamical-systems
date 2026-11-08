@@ -505,10 +505,12 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
       const current = propsRef.current;
       if (gesture === 'pan' && pan && !moved) {
         const now = performance.now();
-        if (now - lastTap < 280) {
-          lastTap = 0;
-          current.onResetViewport();
-        } else {
+          if (now - lastTap < 280) {
+            lastTap = 0;
+            const layout = currentLayout(current.analysis.viewport);
+            const hit = hitTestPhase(layout.main, pan.sx, pan.sy, current.analysis, current.userOrbits, current.layers);
+            if (!hit || !current.onDeleteTrajectory(hit)) current.onResetViewport();
+          } else {
           lastTap = now;
           const layout = currentLayout(current.analysis.viewport);
           const onLinear = layout.linear != null && pan.sx >= layout.linear.left;
@@ -702,7 +704,17 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
         dragRef.current = null;
       }}
       onPointerLeave={() => props.onHoverObject(null)}
-      onDoubleClick={() => props.onResetViewport()}
+      onDoubleClick={(event) => {
+        const wrap = wrapRef.current;
+        if (!wrap) return;
+        const rect = wrap.getBoundingClientRect();
+        const sx = event.clientX - rect.left;
+        const sy = event.clientY - rect.top;
+        const onLinear = layout.linear != null && sx >= layout.linear.left;
+        const view = onLinear && layout.linear ? layout.linear : layout.main;
+        const hit = onLinear ? null : hitTestPhase(view, sx, sy, props.analysis, props.userOrbits, props.layers);
+        if (!hit || !props.onDeleteTrajectory(hit)) props.onResetViewport();
+      }}
     >
       <canvas ref={canvasRef} data-phase-canvas="cartesian" className="absolute inset-0 h-full w-full" />
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>

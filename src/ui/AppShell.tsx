@@ -49,6 +49,7 @@ function Portrait() {
   const setViewport = useSystemStore((state) => state.setViewport);
   const resetViewport = useSystemStore((state) => state.resetViewport);
   const tracePoint = useSystemStore((state) => state.tracePoint);
+  const deleteTrajectory = useSystemStore((state) => state.deleteTrajectory);
   const tracePolar = useSystemStore((state) => state.tracePolar);
   const setFlowMap = useSystemStore((state) => state.setFlowMap);
   const analysis = hideObjects(rawAnalysis, hiddenObjectIds);
@@ -91,6 +92,7 @@ function Portrait() {
                   onSelectObject={selectObject}
                   onViewportChange={setViewport}
                   onTracePoint={tracePoint}
+                  onDeleteTrajectory={deleteTrajectory}
                   onFlowMapChange={setFlowMap}
                   onResetViewport={resetViewport}
                 />

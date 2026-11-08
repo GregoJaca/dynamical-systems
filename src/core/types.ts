@@ -502,6 +502,7 @@ export interface PhaseCanvas2DProps {
   onSelectObject: (id: string | null) => void;
   onViewportChange: (viewport: ViewportBounds) => void;
   onTracePoint: (point: number[]) => void;
+  onDeleteTrajectory: (id: string) => boolean;
   onFlowMapChange: (patch: Partial<FlowMapState>) => void;
   onResetViewport: () => void;
 }

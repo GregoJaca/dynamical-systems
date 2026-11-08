@@ -81,6 +81,7 @@ export interface SystemStore extends SnapshotSource {
   selectEquilibrium: (id: string) => void;
   cycleCompare: (equilibriumId: string) => void;
   toggleHidden: (id: string) => void;
+  deleteTrajectory: (id: string) => boolean;
   tracePoint: (point: number[]) => void;
   tracePolar: (radius: number, theta: number) => void;
   openGallery: () => void;
@@ -879,6 +880,28 @@ export const useSystemStore = create<SystemStore>((set, get) => {
     toggleHidden: (id) => {
       const hidden = get().hiddenObjectIds;
       set({ hiddenObjectIds: hidden.includes(id) ? hidden.filter((item) => item !== id) : [...hidden, id] });
+    },
+
+    deleteTrajectory: (id) => {
+      const state = get();
+      const focus = {
+        hoverObjectId: state.hoverObjectId === id ? null : state.hoverObjectId,
+        selectedObjectId: state.selectedObjectId === id ? null : state.selectedObjectId,
+      };
+      if (state.userOrbits.some((orbit) => orbit.id === id)) {
+        set({ userOrbits: state.userOrbits.filter((orbit) => orbit.id !== id), ...focus });
+        return true;
+      }
+      const segment = state.analysis.streamlines.find((item) => item.id === id);
+      if (!segment || segment.category === 'separatrix' || segment.category === 'limit_cycle') return false;
+      set({
+        analysis: {
+          ...state.analysis,
+          streamlines: state.analysis.streamlines.filter((item) => item.id !== id),
+        },
+        ...focus,
+      });
+      return true;
     },
 
     tracePoint: (point) => {
