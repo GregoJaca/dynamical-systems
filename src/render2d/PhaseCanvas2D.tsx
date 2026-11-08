@@ -362,10 +362,183 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
       current.onViewportChange(zoomViewport(current.analysis.viewport, wx, wy, factor));
     };
     wrap.addEventListener('wheel', onWheel, { passive: false });
+
+    let gesture: 'none' | 'pan' | 'pinch' = 'none';
+    let moved = false;
+    let lastTap = 0;
+    let queued = false;
+    let pendingViewport: ViewportBounds | null = null;
+    let pan:
+      | { x: number; y: number; sx: number; sy: number; viewport: ViewportBounds; kind: 'pan' | 'droplet'; cx: number; cy: number }
+      | null = null;
+    let pinch: { dist: number; midSx: number; midSy: number; viewport: ViewportBounds; wx: number; wy: number } | null = null;
+
+    const publishViewport = (viewport: ViewportBounds) => {
+      pendingViewport = viewport;
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        const next = pendingViewport;
+        pendingViewport = null;
+        if (next) propsRef.current.onViewportChange(next);
+      });
+    };
+
+    const localPoint = (touch: Touch) => {
+      const rect = wrap.getBoundingClientRect();
+      return { sx: touch.clientX - rect.left, sy: touch.clientY - rect.top, cx: touch.clientX, cy: touch.clientY };
+    };
+
+    const currentLayout = (viewport: ViewportBounds) =>
+      layoutViews(sizeRef.current.w, sizeRef.current.h, viewport, propsRef.current.linearization.mode === 'split');
+
+    const onTouchStart = (event: TouchEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, button, a, textarea, select, label')) return;
+      event.preventDefault();
+      const current = propsRef.current;
+      if (event.touches.length >= 2) {
+        const a = localPoint(event.touches[0]);
+        const b = localPoint(event.touches[1]);
+        const midSx = (a.sx + b.sx) / 2;
+        const midSy = (a.sy + b.sy) / 2;
+        const layout = currentLayout(current.analysis.viewport);
+        const [wx, wy] = screenToWorldSafe(layout.main, midSx, midSy);
+        pinch = {
+          dist: Math.max(8, Math.hypot(a.cx - b.cx, a.cy - b.cy)),
+          midSx,
+          midSy,
+          viewport: current.analysis.viewport,
+          wx,
+          wy,
+        };
+        pan = null;
+        gesture = 'pinch';
+        moved = true;
+        return;
+      }
+      const p = localPoint(event.touches[0]);
+      const layout = currentLayout(current.analysis.viewport);
+      const view = layout.linear && p.sx >= layout.linear.left ? layout.linear : layout.main;
+      const [wx, wy] = screenToWorldSafe(view, p.sx, p.sy);
+      const insideDroplet =
+        current.flowMap.active &&
+        view === layout.main &&
+        Math.hypot(wx - current.flowMap.cx, wy - current.flowMap.cy) <= current.flowMap.radius * 1.15;
+      pan = {
+        x: p.cx,
+        y: p.cy,
+        sx: p.sx,
+        sy: p.sy,
+        viewport: current.analysis.viewport,
+        kind: insideDroplet ? 'droplet' : 'pan',
+        cx: current.flowMap.cx,
+        cy: current.flowMap.cy,
+      };
+      pinch = null;
+      gesture = 'pan';
+      moved = false;
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (gesture === 'none') return;
+      event.preventDefault();
+      if (event.touches.length >= 2 && pinch) {
+        const a = localPoint(event.touches[0]);
+        const b = localPoint(event.touches[1]);
+        const dist = Math.max(8, Math.hypot(a.cx - b.cx, a.cy - b.cy));
+        const midSx = (a.sx + b.sx) / 2;
+        const midSy = (a.sy + b.sy) / 2;
+        const factor = Math.min(8, Math.max(0.125, dist / pinch.dist));
+        const zoomed = zoomViewport(pinch.viewport, pinch.wx, pinch.wy, factor);
+        const view = currentLayout(zoomed).main;
+        const spanX = zoomed.xMax - zoomed.xMin;
+        const spanY = zoomed.yMax - zoomed.yMin;
+        publishViewport(
+          panViewport(zoomed, (-(midSx - pinch.midSx) * spanX) / view.width, ((midSy - pinch.midSy) * spanY) / view.height),
+        );
+        moved = true;
+        return;
+      }
+      if (!pan || event.touches.length !== 1) return;
+      const p = localPoint(event.touches[0]);
+      const dx = p.cx - pan.x;
+      const dy = p.cy - pan.y;
+      if (Math.hypot(dx, dy) > 6) moved = true;
+      if (!moved) return;
+      const view = currentLayout(pan.viewport).main;
+      if (pan.kind === 'droplet') {
+        const spanX = view.xMax - view.xMin;
+        const spanY = view.yMax - view.yMin;
+        propsRef.current.onFlowMapChange({
+          cx: pan.cx + (dx * spanX) / view.width,
+          cy: pan.cy - (dy * spanY) / view.height,
+        });
+        return;
+      }
+      const spanX = pan.viewport.xMax - pan.viewport.xMin;
+      const spanY = pan.viewport.yMax - pan.viewport.yMin;
+      publishViewport(panViewport(pan.viewport, (-dx * spanX) / view.width, (dy * spanY) / view.height));
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length === 1) {
+        const p = localPoint(event.touches[0]);
+        const current = propsRef.current;
+        pan = {
+          x: p.cx,
+          y: p.cy,
+          sx: p.sx,
+          sy: p.sy,
+          viewport: pendingViewport ?? current.analysis.viewport,
+          kind: 'pan',
+          cx: current.flowMap.cx,
+          cy: current.flowMap.cy,
+        };
+        pinch = null;
+        gesture = 'pan';
+        moved = true;
+        return;
+      }
+      if (event.touches.length > 1) return;
+      const current = propsRef.current;
+      if (gesture === 'pan' && pan && !moved) {
+        const now = performance.now();
+        if (now - lastTap < 280) {
+          lastTap = 0;
+          current.onResetViewport();
+        } else {
+          lastTap = now;
+          const layout = currentLayout(current.analysis.viewport);
+          const onLinear = layout.linear != null && pan.sx >= layout.linear.left;
+          const view = onLinear && layout.linear ? layout.linear : layout.main;
+          const hit = onLinear ? null : hitTestPhase(view, pan.sx, pan.sy, current.analysis, current.userOrbits, current.layers);
+          if (hit) current.onSelectObject(hit);
+          else {
+            current.onSelectObject(null);
+            const [wx, wy] = screenToWorldSafe(view, pan.sx, pan.sy);
+            current.onTracePoint([wx, wy]);
+          }
+        }
+      }
+      gesture = 'none';
+      pan = null;
+      pinch = null;
+    };
+
+    wrap.addEventListener('touchstart', onTouchStart, { passive: false });
+    wrap.addEventListener('touchmove', onTouchMove, { passive: false });
+    wrap.addEventListener('touchend', onTouchEnd);
+    wrap.addEventListener('touchcancel', onTouchEnd);
     return () => {
       cancelAnimationFrame(raf);
       observer.disconnect();
       wrap.removeEventListener('wheel', onWheel);
+      wrap.removeEventListener('touchstart', onTouchStart);
+      wrap.removeEventListener('touchmove', onTouchMove);
+      wrap.removeEventListener('touchend', onTouchEnd);
+      wrap.removeEventListener('touchcancel', onTouchEnd);
     };
   }, []);
 
@@ -431,34 +604,13 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     x: number;
     y: number;
     moved: boolean;
-    decided: boolean;
     viewport: ViewportBounds;
     cx: number;
     cy: number;
   } | null>(null);
-  const scrollsRef = useRef(false);
-  const [scrolls, setScrolls] = useState(false);
-
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const scroller = wrap.closest('.study-picture');
-    if (!(scroller instanceof HTMLElement)) return;
-    const update = () => {
-      const next = scroller.scrollHeight > scroller.clientHeight + 16;
-      scrollsRef.current = next;
-      setScrolls(next);
-    };
-    const observer = new ResizeObserver(update);
-    observer.observe(scroller);
-    const page = scroller.firstElementChild;
-    if (page) observer.observe(page);
-    update();
-    return () => observer.disconnect();
-  }, []);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.pointerType === 'touch' || event.button !== 0) return;
     const wrap = wrapRef.current;
     if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
@@ -470,22 +622,20 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
       props.flowMap.active &&
       view === layout.main &&
       Math.hypot(wx - props.flowMap.cx, wy - props.flowMap.cy) <= props.flowMap.radius * 1.15;
-    const touch = event.pointerType === 'touch';
-    const decided = !touch || !scrollsRef.current;
     dragRef.current = {
       kind: insideDroplet ? 'droplet' : 'pan',
       x: event.clientX,
       y: event.clientY,
       moved: false,
-      decided,
       viewport: props.analysis.viewport,
       cx: props.flowMap.cx,
       cy: props.flowMap.cy,
     };
-    if (decided) event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') return;
     const wrap = wrapRef.current;
     if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
@@ -495,15 +645,6 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     if (drag) {
       const dx = event.clientX - drag.x;
       const dy = event.clientY - drag.y;
-      if (!drag.decided) {
-        if (Math.hypot(dx, dy) < 8) return;
-        if (scrollsRef.current && Math.abs(dy) >= Math.abs(dx)) {
-          dragRef.current = null;
-          return;
-        }
-        drag.decided = true;
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }
       if (Math.hypot(dx, dy) > 4) drag.moved = true;
       const view = layout.main;
       if (drag.kind === 'droplet') {
@@ -529,6 +670,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') return;
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag || drag.moved || event.detail > 1) return;
@@ -552,7 +694,7 @@ export function PhaseCanvas2D(props: PhaseCanvas2DProps) {
     <div
       ref={wrapRef}
       className="relative h-full w-full overflow-hidden"
-      style={{ background: palette.bg, touchAction: scrolls ? 'pan-y' : 'none', cursor: 'grab' }}
+      style={{ background: palette.bg, touchAction: 'none', cursor: 'grab' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

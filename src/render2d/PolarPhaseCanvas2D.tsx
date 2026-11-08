@@ -419,6 +419,164 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
   arrowRef.current = arrows;
   lyapunovRef.current = lyapunovLevels;
 
+  const boundsRef = useRef(bounds);
+  boundsRef.current = bounds;
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    let mode: 'none' | 'pan' | 'pinch' = 'none';
+    let moved = false;
+    let lastTap = 0;
+    let live = boundsRef.current;
+    let origin: { x: number; y: number; sx: number; sy: number; bounds: PolarBounds } | null = null;
+    let pinch: { dist: number; midSx: number; midSy: number; bounds: PolarBounds; r: number; theta: number } | null = null;
+
+    const metrics = () => {
+      const rect = wrap.getBoundingClientRect();
+      return { width: Math.max(1, rect.width - 78), height: Math.max(1, rect.height - 58), left: 58, top: 28, rect };
+    };
+
+    const locate = (clientX: number, clientY: number, box: PolarBounds) => {
+      const { width, height, left, top, rect } = metrics();
+      const sx = clientX - rect.left;
+      const sy = clientY - rect.top;
+      const r = box.rMin + ((sx - left) / width) * (box.rMax - box.rMin);
+      const theta = box.thMax - ((sy - top) / height) * (box.thMax - box.thMin);
+      return { sx, sy, r, theta, width, height };
+    };
+
+    const clampBox = (box: PolarBounds): PolarBounds => {
+      let { rMin, rMax, thMin, thMax } = box;
+      if (!(rMax > rMin + 0.02)) rMax = rMin + 0.02;
+      if (!(thMax > thMin + 0.02)) thMax = thMin + 0.02;
+      if (rMin < 0) {
+        rMax -= rMin;
+        rMin = 0;
+      }
+      return { rMin, rMax, thMin, thMax };
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      event.preventDefault();
+      if (event.touches.length >= 2) {
+        const a = event.touches[0];
+        const b = event.touches[1];
+        const midX = (a.clientX + b.clientX) / 2;
+        const midY = (a.clientY + b.clientY) / 2;
+        const spot = locate(midX, midY, live);
+        pinch = {
+          dist: Math.max(8, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)),
+          midSx: spot.sx,
+          midSy: spot.sy,
+          bounds: live,
+          r: spot.r,
+          theta: spot.theta,
+        };
+        origin = null;
+        mode = 'pinch';
+        moved = true;
+        return;
+      }
+      const touch = event.touches[0];
+      const spot = locate(touch.clientX, touch.clientY, live);
+      origin = { x: touch.clientX, y: touch.clientY, sx: spot.sx, sy: spot.sy, bounds: live };
+      pinch = null;
+      mode = 'pan';
+      moved = false;
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (mode === 'none') return;
+      event.preventDefault();
+      if (event.touches.length >= 2 && pinch) {
+        const a = event.touches[0];
+        const b = event.touches[1];
+        const dist = Math.max(8, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
+        const factor = Math.min(8, Math.max(0.125, dist / pinch.dist));
+        const mid = locate((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2, pinch.bounds);
+        const zoomed = clampBox({
+          rMin: pinch.r + (pinch.bounds.rMin - pinch.r) / factor,
+          rMax: pinch.r + (pinch.bounds.rMax - pinch.r) / factor,
+          thMin: pinch.theta + (pinch.bounds.thMin - pinch.theta) / factor,
+          thMax: pinch.theta + (pinch.bounds.thMax - pinch.theta) / factor,
+        });
+        const spanR = zoomed.rMax - zoomed.rMin;
+        const spanT = zoomed.thMax - zoomed.thMin;
+        const { width, height } = metrics();
+        const next = clampBox({
+          rMin: zoomed.rMin - ((mid.sx - pinch.midSx) * spanR) / width,
+          rMax: zoomed.rMax - ((mid.sx - pinch.midSx) * spanR) / width,
+          thMin: zoomed.thMin + ((mid.sy - pinch.midSy) * spanT) / height,
+          thMax: zoomed.thMax + ((mid.sy - pinch.midSy) * spanT) / height,
+        });
+        live = next;
+        setBounds(next);
+        return;
+      }
+      if (!origin || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      const dx = touch.clientX - origin.x;
+      const dy = touch.clientY - origin.y;
+      if (Math.hypot(dx, dy) > 6) moved = true;
+      if (!moved) return;
+      const spanR = origin.bounds.rMax - origin.bounds.rMin;
+      const spanT = origin.bounds.thMax - origin.bounds.thMin;
+      const { width, height } = metrics();
+      const next = clampBox({
+        rMin: origin.bounds.rMin - (dx * spanR) / width,
+        rMax: origin.bounds.rMax - (dx * spanR) / width,
+        thMin: origin.bounds.thMin + (dy * spanT) / height,
+        thMax: origin.bounds.thMax + (dy * spanT) / height,
+      });
+      live = next;
+      setBounds(next);
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length === 1) {
+        const touch = event.touches[0];
+        const spot = locate(touch.clientX, touch.clientY, live);
+        origin = { x: touch.clientX, y: touch.clientY, sx: spot.sx, sy: spot.sy, bounds: live };
+        pinch = null;
+        mode = 'pan';
+        moved = true;
+        return;
+      }
+      if (event.touches.length > 1) return;
+      if (mode === 'pan' && origin && !moved) {
+        const now = performance.now();
+        if (now - lastTap < 280) {
+          lastTap = 0;
+          const next = suggestedRadius(propsRef.current);
+          setBounds({ rMin: 0, rMax: next, thMin: -Math.PI, thMax: Math.PI });
+          live = { rMin: 0, rMax: next, thMin: -Math.PI, thMax: Math.PI };
+        } else {
+          lastTap = now;
+          const changed = event.changedTouches[0];
+          if (changed) {
+            const spot = locate(changed.clientX, changed.clientY, boundsRef.current);
+            propsRef.current.onTracePolar(Math.max(0, spot.r), Math.atan2(Math.sin(spot.theta), Math.cos(spot.theta)));
+          }
+        }
+      }
+      mode = 'none';
+      origin = null;
+      pinch = null;
+    };
+
+    wrap.addEventListener('touchstart', onTouchStart, { passive: false });
+    wrap.addEventListener('touchmove', onTouchMove, { passive: false });
+    wrap.addEventListener('touchend', onTouchEnd);
+    wrap.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      wrap.removeEventListener('touchstart', onTouchStart);
+      wrap.removeEventListener('touchmove', onTouchMove);
+      wrap.removeEventListener('touchend', onTouchEnd);
+      wrap.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, []);
+
   const palette = PALETTE[props.theme];
 
   const traceAt = (clientX: number, clientY: number) => {
@@ -433,12 +591,13 @@ export function PolarPhaseCanvas2D(props: PolarCanvasProps) {
     <div
       ref={wrapRef}
       className="relative h-full w-full overflow-hidden"
-      style={{ background: palette.bg, touchAction: 'pan-y' }}
+      style={{ background: palette.bg, touchAction: 'none' }}
       onPointerDown={(event) => {
-        if (event.button !== 0) return;
+        if (event.pointerType === 'touch' || event.button !== 0) return;
         pressRef.current = { x: event.clientX, y: event.clientY };
       }}
       onPointerUp={(event) => {
+        if (event.pointerType === 'touch') return;
         const press = pressRef.current;
         pressRef.current = null;
         if (!press || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6) return;

@@ -251,8 +251,11 @@ export function AppShell() {
   const narrow = useNarrowStudy();
   const sideScrollRef = useRef<HTMLDivElement>(null);
   const studyRef = useRef<HTMLDivElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
   const splitDrag = useRef<{ pointer: number; startY: number; startHeight: number } | null>(null);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  const panelHeightRef = useRef<number | null>(null);
+  panelHeightRef.current = panelHeight;
   const openStudyTab = (tab: 'system' | 'picture' | 'notes') => {
     setStudyTab(tab);
     if (narrow) sideScrollRef.current?.scrollTo({ top: 0 });
@@ -276,7 +279,7 @@ export function AppShell() {
   }, [narrow]);
 
   const onSplitPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!narrow || panelHeight == null) return;
+    if (event.pointerType === 'touch' || !narrow || panelHeight == null) return;
     splitDrag.current = { pointer: event.pointerId, startY: event.clientY, startHeight: panelHeight };
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -295,6 +298,48 @@ export function AppShell() {
   const onSplitPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (splitDrag.current?.pointer === event.pointerId) splitDrag.current = null;
   };
+
+  useEffect(() => {
+    const handle = splitRef.current;
+    if (!handle) return;
+    let active = false;
+    let startY = 0;
+    let startH = 0;
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (!active) return;
+      event.preventDefault();
+      const grid = studyRef.current;
+      const touch = event.touches[0];
+      if (!grid || !touch) return;
+      setPanelHeight(clampPanel(grid.clientHeight, startH - (touch.clientY - startY)));
+    };
+
+    const onTouchEnd = () => {
+      active = false;
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchEnd);
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (!window.matchMedia('(max-width: 860px)').matches || event.touches.length !== 1) return;
+      event.preventDefault();
+      const grid = studyRef.current;
+      active = true;
+      startY = event.touches[0].clientY;
+      startH = panelHeightRef.current ?? (grid ? Math.round(grid.clientHeight * 0.42) : 280);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', onTouchEnd);
+      window.addEventListener('touchcancel', onTouchEnd);
+    };
+
+    handle.addEventListener('touchstart', onTouchStart, { passive: false });
+    return () => {
+      handle.removeEventListener('touchstart', onTouchStart);
+      onTouchEnd();
+    };
+  }, [view]);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -348,6 +393,7 @@ export function AppShell() {
               <Portrait />
             </div>
             <div
+              ref={splitRef}
               className="study-split"
               role="separator"
               aria-orientation="horizontal"
