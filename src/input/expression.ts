@@ -1,7 +1,7 @@
 /**
  * Turns calculator-style math into an explicit mathjs expression.
  * Function names stay functions: `sin x`, `arctan(x)`, `sin^2 x`, `|x|`.
- * Multi-letter names such as `mu` and `gamma` stay parameters.
+ * Adjacent letters multiply (`xy` is `x*y`). Greek names such as `mu` and `gamma` stay whole.
  */
 
 export type FnSpec = { name: string; min: number; max: number; implicit: boolean };
@@ -139,19 +139,20 @@ const INVERSE: Record<string, string> = {
 const FUNCTION_KEYS = Object.keys(ALIASES).sort((a, b) => b.length - a.length);
 
 const NAMED_SYMBOLS = [
+  'infinity',
   'varepsilon',
   'epsilon',
   'vartheta',
   'varphi',
+  'lambda',
   'alpha',
-  'beta',
   'gamma',
   'delta',
   'theta',
   'kappa',
-  'lambda',
   'sigma',
   'omega',
+  'beta',
   'zeta',
   'iota',
   'chi',
@@ -159,12 +160,20 @@ const NAMED_SYMBOLS = [
   'phi',
   'rho',
   'tau',
+  'eps',
   'eta',
+  'nan',
   'mu',
   'nu',
   'xi',
   'pi',
 ].sort((a, b) => b.length - a.length);
+
+const SYMBOL_CANON: Record<string, string> = {
+  eps: 'epsilon',
+  infinity: 'Infinity',
+  nan: 'NaN',
+};
 
 const CANONICAL_FUNCTIONS = new Set(Object.values(ALIASES));
 
@@ -239,6 +248,46 @@ const SUPERSCRIPT: Record<string, string> = {
   '⁹': '9',
   '⁻': '-',
   '⁺': '+',
+  'ⁿ': 'n',
+  'ⁱ': 'i',
+  'ᵃ': 'a',
+  'ᵇ': 'b',
+  'ᶜ': 'c',
+  'ᵈ': 'd',
+  'ᵉ': 'e',
+  'ᶠ': 'f',
+  'ᵍ': 'g',
+  'ʰ': 'h',
+  'ʲ': 'j',
+  'ᵏ': 'k',
+  'ˡ': 'l',
+  'ᵐ': 'm',
+  'ᵒ': 'o',
+  'ᵖ': 'p',
+  'ʳ': 'r',
+  'ˢ': 's',
+  'ᵗ': 't',
+  'ᵘ': 'u',
+  'ᵛ': 'v',
+  'ʷ': 'w',
+  'ˣ': 'x',
+  'ʸ': 'y',
+  'ᶻ': 'z',
+};
+
+const DOTTED: Record<string, string> = {
+  'ẋ': "x'",
+  'Ẋ': "X'",
+  'ẏ': "y'",
+  'Ẏ': "Y'",
+  'ż': "z'",
+  'Ż': "Z'",
+  'ẍ': "x''",
+  'Ẍ': "X''",
+  'ṁ': "m'",
+  'Ṁ': "M'",
+  'ṅ': "n'",
+  'Ṅ': "N'",
 };
 
 const SUBSCRIPT: Record<string, string> = {
@@ -322,37 +371,77 @@ const LATEX_COMMANDS: Record<string, string> = {
 };
 
 /** Unicode, LaTeX, and calculator syntax folded into an explicit mathjs expression. */
-export function prepareMath(raw: string): string {
+export function prepareMath(raw: string, known: readonly string[] = []): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
-  return rewriteMath(expandLatex(foldUnicode(trimmed)));
+  const names = [...known].sort((a, b) => b.length - a.length);
+  return rewriteMath(expandLatex(foldUnicode(trimmed)), names);
 }
 
-export function rewriteMath(input: string): string {
+/** The name typed in the variable field: `x_1`, `x₁`, and `θ` become the symbol used in equations. */
+export function readDeclaredName(raw: string): string {
+  const folded = expandLatex(foldUnicode(raw)).replace(/\s+/g, '');
+  if (!folded) throw new Error('Name each variable.');
+  if (/['′″‴˙]/.test(folded)) {
+    throw new Error(`"${raw.trim()}" includes a derivative. Name the variable itself, for example x.`);
+  }
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(folded)) {
+    throw new Error(`"${raw.trim()}" is not a variable name. Use a letter, x_1, or a Greek name such as theta.`);
+  }
+  const name = canonicalSymbol(folded);
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(name)) {
+    throw new Error(`"${raw.trim()}" is not a variable name. Use a letter, x_1, or a Greek name such as theta.`);
+  }
+  return name;
+}
+
+export function rewriteMath(input: string, known: readonly string[] = []): string {
   const eq = indexOfTopLevelEquals(input);
   if (eq >= 0) {
     const left = input.slice(0, eq).trim();
     const right = input.slice(eq + 1).trim();
     if (!left || !right) throw new Error('Equation is missing one side.');
-    return `${rewriteMath(left)} = ${rewriteMath(right)}`;
+    return `${rewriteMath(left, known)} = ${rewriteMath(right, known)}`;
   }
   if (!input.trim()) throw new Error('Expression is empty.');
-  const tokens = matchAbs(lex(input));
+  const tokens = matchAbs(lex(input, known));
   return print(new Parser(tokens).parseExpression());
 }
 
 function foldUnicode(text: string): string {
+  const chars = [...text];
   let out = '';
-  for (const char of text) {
+  for (let i = 0; i < chars.length; i += 1) {
+    const char = chars[i] ?? '';
     if (char === '−' || char === '–' || char === '—') out += '-';
-    else if (char === '×' || char === '·' || char === '∙' || char === '⋅') out += '*';
-    else if (char === '÷') out += '/';
+    else if (char === '×' || char === '·' || char === '∙' || char === '⋅' || char === '∗') out += '*';
+    else if (char === '÷' || char === '∕' || char === '⁄') out += '/';
     else if (char === '√') out += 'sqrt';
     else if (char === '∛') out += 'cbrt';
     else if (char === '∞') out += 'Infinity';
-    else if (SUPERSCRIPT[char]) out += `^${SUPERSCRIPT[char]}`;
-    else if (SUBSCRIPT[char]) out += `_${SUBSCRIPT[char]}`;
-    else if (VULGAR[char]) out += VULGAR[char];
+    else if (char === '∣') out += '|';
+    else if (char === '″') out += "''";
+    else if (char === '‴') out += "'''";
+    else if (char === '′' || char === '’' || char === 'ʼ' || char === 'ˈ' || char === '˙' || char === '\u0307') out += "'";
+    else if (DOTTED[char]) out += DOTTED[char];
+    else if (SUPERSCRIPT[char]) {
+      let body = '';
+      while (i < chars.length && SUPERSCRIPT[chars[i] ?? '']) {
+        body += SUPERSCRIPT[chars[i] ?? ''];
+        i += 1;
+      }
+      i -= 1;
+      out += `^(${body})`;
+    } else if (SUBSCRIPT[char]) {
+      let body = '';
+      while (i < chars.length && SUBSCRIPT[chars[i] ?? '']) {
+        body += SUBSCRIPT[chars[i] ?? ''];
+        i += 1;
+      }
+      out += `_${body}`;
+      if (isDigit(chars[i] ?? '')) out += ' ';
+      i -= 1;
+    } else if (VULGAR[char]) out += VULGAR[char];
     else if (UNICODE_GREEK[char]) out += UNICODE_GREEK[char];
     else out += char;
   }
@@ -367,6 +456,7 @@ function expandLatex(text: string): string {
   source = source.replace(/\\dot\s*([A-Za-z_][A-Za-z0-9_]*)/g, "$1'");
   source = source.replace(/\\frac\{d\^2\s*([A-Za-z_][A-Za-z0-9_]*)\}\{d[a-zA-Z]\^2\}/g, "$1''");
   source = source.replace(/d\^2\s*([A-Za-z_][A-Za-z0-9_]*)\s*\/\s*d[a-zA-Z]\^2/g, "$1''");
+  source = source.replace(/d\^\(2\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\/\s*d[a-zA-Z]\^\(2\)/g, "$1''");
   source = source.replace(/\\frac\{d\s*([A-Za-z_][A-Za-z0-9_]*)\}\{d[a-zA-Z]\}/g, "$1'");
   source = source.replace(/\bd\s*([A-Za-z_][A-Za-z0-9_]*)\s*\/\s*d[a-zA-Z]\b/g, "$1'");
   const expanded = scanLatex(source);
@@ -462,7 +552,7 @@ function readBrace(text: string, index: number): { value: string; next: number }
   throw new Error('A LaTeX brace group is not closed.');
 }
 
-function lex(input: string): Token[] {
+function lex(input: string, known: readonly string[]): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < input.length) {
@@ -519,7 +609,7 @@ function lex(input: string): Token[] {
       i += 1;
       while (i < input.length && (isLetter(input[i] ?? '') || isDigit(input[i] ?? '') || input[i] === '_')) i += 1;
       const word = input.slice(start, i);
-      const classified = classifyWord(word);
+      const classified = classifyWord(word, known);
       while (input[i] === "'") {
         const last = classified[classified.length - 1];
         if (!last || last.type !== 'id') throw new Error(`A derivative mark cannot follow "${word}".`);
@@ -534,59 +624,78 @@ function lex(input: string): Token[] {
   return tokens;
 }
 
-function classifyWord(word: string): Token[] {
-  const indexed = word.match(/^([A-Za-z])_(\d+)$/);
-  if (indexed) return [{ type: 'id', value: `${indexed[1]}${indexed[2]}` }];
-  const logBase = word.match(/^log_(\d+)$/i);
-  if (logBase?.[1]) return [{ type: 'fn', name: 'log', typed: word, base: logBase[1] }];
-  const exact = ALIASES[word.toLowerCase()];
-  if (exact && word.toLowerCase() in ALIASES) return [{ type: 'fn', name: exact, typed: word }];
-  const lower = word.toLowerCase();
-  for (const key of FUNCTION_KEYS) {
-    if (lower.startsWith(key) && lower.length > key.length) {
-      const tail = parseGluedTail(word.slice(key.length));
-      if (tail) return [{ type: 'fn', name: ALIASES[key] ?? key, typed: word.slice(0, key.length) }, ...tail];
-    }
-  }
-  return [{ type: 'id', value: canonicalSymbol(word) }];
-}
-
-function parseGluedTail(rest: string): Token[] | null {
-  if (!rest) return null;
+function classifyWord(word: string, known: readonly string[]): Token[] {
   const tokens: Token[] = [];
   let index = 0;
-  if (isDigit(rest[0] ?? '') || rest[0] === '.') {
-    try {
-      const number = readNumber(rest, 0);
-      tokens.push({ type: 'num', value: number.value });
-      index = number.next;
-    } catch {
-      return null;
+  while (index < word.length) {
+    const logBase = /^log_(\d+)/i.exec(word.slice(index));
+    if (logBase?.[1]) {
+      tokens.push({ type: 'fn', name: 'log', typed: logBase[0], base: logBase[1] });
+      index += logBase[0].length;
+      continue;
     }
+    const piece = longestPiece(word, index, known);
+    tokens.push(piece.token);
+    index = piece.next;
   }
-  if (index === rest.length) return tokens;
-  const symbol = readSingleSymbol(rest, index);
-  if (!symbol || symbol.next !== rest.length) return null;
-  tokens.push({ type: 'id', value: symbol.name });
   return tokens;
 }
 
-function readSingleSymbol(text: string, index: number): { name: string; next: number } | null {
-  const lower = text.toLowerCase();
-  for (const name of NAMED_SYMBOLS) {
-    if (lower.startsWith(name, index)) return { name, next: index + name.length };
+function longestPiece(word: string, index: number, known: readonly string[]): { token: Token; next: number } {
+  const lower = word.toLowerCase();
+  let best: { token: Token; next: number; rank: number } | null = null;
+  const consider = (candidate: { token: Token; next: number; rank: number }) => {
+    if (!best || candidate.next > best.next || (candidate.next === best.next && candidate.rank > best.rank)) best = candidate;
+  };
+  for (const key of FUNCTION_KEYS) {
+    if (!lower.startsWith(key, index)) continue;
+    const name = ALIASES[key] ?? key;
+    const spec = SPECS[name];
+    const next = index + key.length;
+    if (!spec?.implicit && next !== word.length) continue;
+    consider({ token: { type: 'fn', name, typed: word.slice(index, next) }, next, rank: 3 });
   }
-  if (!isLetter(text[index] ?? '')) return null;
-  let next = index + 1;
-  while (isDigit(text[next] ?? '')) next += 1;
-  return { name: text.slice(index, next), next };
+  for (const name of NAMED_SYMBOLS) {
+    if (!lower.startsWith(name, index)) continue;
+    const next = index + name.length + trailingIndex(word, index + name.length);
+    consider({ token: { type: 'id', value: canonicalSymbol(word.slice(index, next)) }, next, rank: 2 });
+  }
+  for (const name of known) {
+    if (!name) continue;
+    const matches = name.length === 1 ? word.startsWith(name, index) : word.slice(index, index + name.length).toLowerCase() === name.toLowerCase();
+    if (!matches) continue;
+    consider({ token: { type: 'id', value: name }, next: index + name.length, rank: 2 });
+  }
+  if (isLetter(word[index] ?? '')) {
+    const next = index + 1 + trailingIndex(word, index + 1);
+    consider({ token: { type: 'id', value: word.slice(index, next).replaceAll('_', '') }, next, rank: 1 });
+  }
+  if (best) return best;
+  if (isDigit(word[index] ?? '') || word[index] === '.') {
+    const number = readNumber(word, index);
+    return { token: { type: 'num', value: number.value }, next: number.next };
+  }
+  throw new Error(`Unexpected "${word[index] ?? ''}" in the expression.`);
+}
+
+function trailingIndex(word: string, index: number): number {
+  if (word[index] === '_' && isDigit(word[index + 1] ?? '')) {
+    let next = index + 2;
+    while (isDigit(word[next] ?? '')) next += 1;
+    return next - index;
+  }
+  let next = index;
+  while (isDigit(word[next] ?? '')) next += 1;
+  return next - index;
 }
 
 function canonicalSymbol(word: string): string {
-  const lower = word.toLowerCase();
-  if (NAMED_SYMBOLS.includes(lower)) return lower;
-  if (lower === 'pi') return 'pi';
-  return word;
+  const indexed = word.match(/^([A-Za-z]+)_(\d+)$/);
+  const stem = (indexed?.[1] ?? word).toLowerCase();
+  const suffix = indexed?.[2] ?? '';
+  const canon = SYMBOL_CANON[stem] ?? (NAMED_SYMBOLS.includes(stem) ? stem : null);
+  if (canon) return `${canon}${suffix}`;
+  return word.replace('_', '');
 }
 
 function matchAbs(tokens: Token[]): Token[] {

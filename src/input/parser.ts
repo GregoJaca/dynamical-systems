@@ -13,7 +13,7 @@ import {
   type MathNode,
 } from 'mathjs';
 import type { CompiledSystem, ParameterSpec, ParseSystemInput, SystemSpec } from '../core/types';
-import { isBuiltInFunction, prepareMath } from './expression';
+import { isBuiltInFunction, prepareMath, readDeclaredName } from './expression';
 
 const CONSTANTS = new Set(['e', 'E', 'pi', 'PI', 'i', 'Infinity', 'NaN', 'true', 'false']);
 
@@ -57,12 +57,14 @@ export function tryParseSystem(input: ParseSystemInput): ParseResult {
   }
 }
 
+export function equationLooksSecondOrder(raw: string): boolean {
+  return /''|″|‴|ẍ|Ẍ|\\ddot|d\^2|d²|d\^\(2\)/.test(raw) || raw.includes('′′');
+}
+
 export function parseSystem(input: ParseSystemInput): SystemSpec {
   const independentVar = input.independentVar?.trim() || 't';
-  const mode = input.mode;
-  if (mode === 'second_order_scalar') {
-    return parseSecondOrder(input, independentVar);
-  }
+  const secondOrder = input.mode === 'second_order_scalar' || (input.rows.length === 1 && equationLooksSecondOrder(input.rows[0] ?? ''));
+  if (secondOrder) return parseSecondOrder({ ...input, mode: 'second_order_scalar' }, independentVar);
   return parseFirstOrder(input, independentVar);
 }
 
@@ -121,11 +123,11 @@ function parseFirstOrder(input: ParseSystemInput, independentVar: string): Syste
   if (!Number.isInteger(dimension) || dimension < 1) {
     throw new Error('Dimension must be a positive integer.');
   }
-  const stateVars = resolveStateVars(input.stateVars, dimension);
+  const stateVars = resolveStateVars(input.stateVars, dimension, independentVar);
   if (input.rows.length !== dimension) {
     throw new Error(`Expected ${dimension} equation${dimension === 1 ? '' : 's'}, received ${input.rows.length}.`);
   }
-  const parsed = input.rows.map((row, index) => parseFirstOrderRow(row, stateVars[index] ?? `x${index + 1}`, index));
+  const parsed = input.rows.map((row, index) => parseFirstOrderRow(row, stateVars[index] ?? `x${index + 1}`, index, stateVars));
   const rhsExpressions = stateVars.map((name, index) => {
     const named = parsed.find((row) => row.variable === name && row.explicit);
     return (named ?? parsed[index]).rhs;
@@ -134,15 +136,18 @@ function parseFirstOrder(input: ParseSystemInput, independentVar: string): Syste
 }
 
 function parseSecondOrder(input: ParseSystemInput, independentVar: string): SystemSpec {
-  const position = input.stateVars?.[0]?.trim() || 'x';
-  const velocity = input.stateVars?.[1]?.trim() || 'v';
+  const rawPosition = input.stateVars?.[0]?.trim() ?? '';
+  const rawVelocity = input.stateVars?.[1]?.trim() ?? '';
+  const position = rawPosition ? readDeclaredName(rawPosition) : 'x';
+  const velocity = rawVelocity ? readDeclaredName(rawVelocity) : position === 'v' ? 'w' : 'v';
   const stateVars = [position, velocity];
+  assertStateNames(stateVars, independentVar);
   const row = input.rows[0];
   if (row === undefined || input.rows.length === 0) {
     throw new Error('Equation 1 is empty.');
   }
   if (!row.trim()) throw new Error('Equation 1 is empty.');
-  const rhsExpressions = expandSecondOrder(row, position, velocity);
+  const rhsExpressions = expandSecondOrder(row, position, velocity, stateVars);
   return finishSpec(input, stateVars, rhsExpressions, independentVar, 2);
 }
 
@@ -153,7 +158,7 @@ function finishSpec(
   independentVar: string,
   dimension = input.dimension,
 ): SystemSpec {
-  const userLyapunovExpr = canonicalizeOptional(input.userLyapunovExpr, 'Lyapunov function');
+  const userLyapunovExpr = canonicalizeOptional(input.userLyapunovExpr, 'Lyapunov function', stateVars);
   const symbols = new Set<string>();
   for (const expr of rhsExpressions) collectSymbols(parse(expr), symbols);
   if (userLyapunovExpr) collectSymbols(parse(userLyapunovExpr), symbols);
@@ -207,10 +212,10 @@ function finishSpec(
   };
 }
 
-function parseFirstOrderRow(raw: string, fallbackVar: string, index: number): { variable: string; rhs: string; explicit: boolean } {
+function parseFirstOrderRow(raw: string, fallbackVar: string, index: number, known: readonly string[]): { variable: string; rhs: string; explicit: boolean } {
   const label = `Equation ${index + 1}`;
   if (!raw || !raw.trim()) throw new Error(`${label} is empty.`);
-  const normalized = normalizeMath(raw);
+  const normalized = normalizeMath(raw, known);
   if (!normalized) throw new Error(`${label} is empty.`);
   const eq = indexOfTopLevelEquals(normalized);
   if (eq < 0) {
@@ -232,8 +237,8 @@ function parseFirstOrderRow(raw: string, fallbackVar: string, index: number): { 
   return { variable: match[1] ?? fallbackVar, rhs: canonicalize(rhs), explicit: true };
 }
 
-function expandSecondOrder(raw: string, position: string, velocity: string): [string, string] {
-  let text = normalizeMath(raw);
+function expandSecondOrder(raw: string, position: string, velocity: string, known: readonly string[]): [string, string] {
+  let text = normalizeMath(raw, known);
   const second = '__second';
   const first = '__first';
   text = text.replace(new RegExp(`\\b${escapeRegExp(position)}''`, 'g'), second);
@@ -263,15 +268,15 @@ function expandSecondOrder(raw: string, position: string, velocity: string): [st
   return [velocity, canonicalize(solved)];
 }
 
-function normalizeMath(raw: string): string {
-  return prepareMath(raw);
+function normalizeMath(raw: string, known: readonly string[]): string {
+  return prepareMath(raw, known);
 }
 
-function canonicalizeOptional(raw: string | undefined, label: string): string | undefined {
+function canonicalizeOptional(raw: string | undefined, label: string, known: readonly string[]): string | undefined {
   const trimmed = raw?.trim();
   if (!trimmed) return undefined;
   try {
-    return canonicalize(prepareMath(trimmed));
+    return canonicalize(prepareMath(trimmed, known));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${label}: ${message}`);
@@ -365,18 +370,38 @@ export function paintSymbolLatex(tex: string, symbols: string[]): string {
 
 export function symbolToLatex(name: string): string {
   if (GREEK[name]) return GREEK[name];
+  const greekIndexed = name.match(/^([a-z]+)(\d+)$/);
+  if (greekIndexed && GREEK[greekIndexed[1]!]) return `${GREEK[greekIndexed[1]!]}_{${greekIndexed[2]}}`;
   const indexed = name.match(/^([A-Za-z])(\d+)$/);
   if (indexed) return `${GREEK[indexed[1]!] ?? indexed[1]}_{${indexed[2]}}`;
   return /^[A-Za-z]$/.test(name) ? name : `\\mathrm{${name}}`;
 }
 
-function resolveStateVars(requested: string[] | undefined, dimension: number): string[] {
-  const vars = (requested ?? []).map((name) => name.trim()).filter(Boolean);
+function resolveStateVars(requested: string[] | undefined, dimension: number, independentVar: string): string[] {
+  const vars: string[] = [];
+  for (const name of requested ?? []) {
+    if (!name.trim()) continue;
+    vars.push(readDeclaredName(name));
+  }
   while (vars.length < dimension) {
     const fallback = DEFAULT_VARS[vars.length] ?? `x${vars.length + 1}`;
     vars.push(vars.includes(fallback) ? `x${vars.length + 1}` : fallback);
   }
-  return vars.slice(0, dimension);
+  const chosen = vars.slice(0, dimension);
+  assertStateNames(chosen, independentVar);
+  return chosen;
+}
+
+function assertStateNames(names: string[], independentVar: string): void {
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) throw new Error(`"${name}" names more than one variable. x_1 and x₁ are the same name.`);
+    seen.add(name);
+    if (isBuiltInFunction(name)) throw new Error(`"${name}" is a function. Use it in an equation, for example ${name}(x).`);
+    if (CONSTANTS.has(name) || name === independentVar) {
+      throw new Error(`"${name}" is reserved. ${independentVar} is time, and pi and e are constants.`);
+    }
+  }
 }
 
 function indexOfTopLevelEquals(text: string): number {

@@ -23,7 +23,7 @@ import type {
   ViewportBounds,
 } from '../core/types';
 import { exampleToSpec } from '../examples/perkoExamples';
-import { compileSystemNumeric, tryParseSystem } from '../input/parser';
+import { compileSystemNumeric, equationLooksSecondOrder, tryParseSystem } from '../input/parser';
 import { decodeShareState, encodeShareState } from '../share/urlState';
 import { emptyAnalysis } from './emptyAnalysis';
 import { mergeCas } from '../cas/mergeCas';
@@ -667,7 +667,7 @@ export const useSystemStore = create<SystemStore>((set, get) => {
         return;
       }
       const spec = get().spec;
-      const secondOrder = equations.length === 1 && /''|′′/.test(equations[0] ?? '');
+      const secondOrder = equations.length === 1 && equationLooksSecondOrder(equations[0] ?? '');
       const velocity = spec.mode === 'second_order_scalar' ? (spec.stateVars[1] ?? 'v') : 'v';
       reparse({
         mode: secondOrder ? 'second_order_scalar' : 'autonomous',

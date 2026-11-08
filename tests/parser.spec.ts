@@ -24,22 +24,25 @@ describe('parser', () => {
   });
 
   it('drops a parameter that the current equations no longer mention', () => {
-    const glued = parseSystem({
+    const withMu = parseSystem({
       mode: 'autonomous',
       dimension: 2,
       stateVars: ['x', 'y'],
-      rows: ['xy', '-y'],
+      rows: ['mu*x', '-y'],
     });
-    expect(Object.keys(glued.parameters)).toEqual(['xy']);
+    expect(Object.keys(withMu.parameters)).toEqual(['mu']);
 
-    const product = parseSystem({
+    const cleared = parseSystem({
       mode: 'autonomous',
       dimension: 2,
       stateVars: ['x', 'y'],
       rows: ['x*y', '-y'],
-      parameterOverrides: glued.parameters,
+      parameterOverrides: {
+        ...withMu.parameters,
+        xy: { value: 4, min: -5, max: 5, step: 0.01 },
+      },
     });
-    expect(product.parameters).toEqual({});
+    expect(cleared.parameters).toEqual({});
 
     const tuned = parseSystem({
       mode: 'autonomous',
@@ -237,7 +240,7 @@ describe('calculator-style expressions', () => {
     expect(scalar(row).parameters.sqrt).toBeUndefined();
   });
 
-  it('keeps multi-letter parameters and does not split unknown words', () => {
+  it('keeps greek names whole and multiplies adjacent letters', () => {
     const pendulum = parseSystem({
       mode: 'second_order_scalar',
       dimension: 2,
@@ -248,12 +251,24 @@ describe('calculator-style expressions', () => {
     const compiled = compileSystemNumeric(pendulum);
     expect(compiled.f(0, [Math.PI / 2, 1], { gamma: 0.5 })).toEqual([1, expect.closeTo(-0.5 - 1, 8)]);
 
-    const custom = scalar('singular * x + eps');
-    expect(Object.keys(custom.parameters).sort()).toEqual(['eps', 'singular']);
     expect(valueAt('mu * x', 3, { mu: 2 })).toBeCloseTo(6, 8);
+    expect(valueAt('eps * x', 3, { epsilon: 2 })).toBeCloseTo(6, 8);
+    expect(scalar('eps * x').parameters.epsilon).toBeDefined();
+    expect(scalar('eps * x').parameters.eps).toBeUndefined();
+
+    const product = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['xy + 2z', 'x2y'],
+    });
+    expect(Object.keys(product.parameters).sort()).toEqual(['x2', 'z']);
+    const values = compileSystemNumeric(product).f(0, [3, 4], { z: 5, x2: 10 });
+    expect(values[0]).toBeCloseTo(3 * 4 + 2 * 5, 8);
+    expect(values[1]).toBeCloseTo(10 * 4, 8);
   });
 
-  it('applies a function to a neighboring product and keeps an unknown glued word', () => {
+  it('applies a function to a neighboring product, including letters written together', () => {
     const spaced = parseSystem({
       mode: 'autonomous',
       dimension: 2,
@@ -265,9 +280,16 @@ describe('calculator-style expressions', () => {
     expect(compiled.f(0, [2, 2], {})[0]).toBeCloseTo(Math.sin(4), 8);
     expect(compiled.f(0, [Math.PI / 2, 0], {})[1]).toBeCloseTo(1, 8);
 
-    const glued = scalar('sinxy');
-    expect(glued.parameters.sinxy).toBeDefined();
-    expect(compileSystemNumeric(glued).f(0, [2], {})[0]).toBeCloseTo(1, 8);
+    const glued = parseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x', 'y'],
+      rows: ['sinxy', 'mux'],
+    });
+    expect(glued.parameters).toEqual({ mu: expect.objectContaining({ name: 'mu' }) });
+    const gluedValues = compileSystemNumeric(glued).f(0, [2, 2], { mu: 3 });
+    expect(gluedValues[0]).toBeCloseTo(Math.sin(4), 8);
+    expect(gluedValues[1]).toBeCloseTo(6, 8);
   });
 
   it('asks for an argument instead of inventing a slider', () => {
@@ -295,10 +317,97 @@ describe('calculator-style expressions', () => {
   });
 
   it('prepares implicit products without turning greek names into letters', () => {
-    expect(prepareMath('sin 2theta')).toContain('sin');
-    expect(prepareMath('sin 2theta')).toContain('theta');
-    expect(prepareMath('mux')).toBe('mux');
-    expect(prepareMath('arctan x + mu')).toContain('atan');
-    expect(prepareMath('arctan x + mu')).toContain('mu');
+    expect(prepareMath('sin 2theta')).toBe('sin((2 * theta))');
+    expect(prepareMath('mux')).toBe('(mu * x)');
+    expect(prepareMath('xy')).toBe('(x * y)');
+    expect(prepareMath('sinxy')).toBe('sin((x * y))');
+    expect(prepareMath('arctan x + mu')).toBe('(atan(x) + mu)');
+  });
+
+  it('reads textbook notation pasted into an equation', () => {
+    expect(valueAt('x⁻¹', 2)).toBeCloseTo(0.5, 8);
+    expect(valueAt('x²', 3)).toBeCloseTo(9, 8);
+    expect(valueAt('eˣ', 0)).toBeCloseTo(1, 8);
+    expect(valueAt('πx', 2)).toBeCloseTo(2 * Math.PI, 8);
+    expect(valueAt('2×x', 4)).toBeCloseTo(8, 8);
+    expect(valueAt('∣x∣', -2)).toBeCloseTo(2, 8);
+    expect(valueAt('log₂8', 1)).toBeCloseTo(3, 8);
+    expect(valueAt('x²y', 3, { y: 4 })).toBeCloseTo(36, 8);
+
+    const dotted = parseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['x'],
+      rows: ['ẋ = -x'],
+    });
+    expect(dotted.parameters).toEqual({});
+    expect(compileSystemNumeric(dotted).f(0, [2], {})[0]).toBeCloseTo(-2, 8);
+
+    const oscillator = parseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['x'],
+      rows: ['ẍ + x = 0'],
+    });
+    expect(oscillator.mode).toBe('second_order_scalar');
+    expect(oscillator.stateVars).toEqual(['x', 'v']);
+    expect(compileSystemNumeric(oscillator).f(0, [0, 1], {})).toEqual([1, expect.closeTo(0, 8)]);
+
+    const leibniz = parseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['x'],
+      rows: ['d²x/dt² + x = 0'],
+    });
+    expect(leibniz.mode).toBe('second_order_scalar');
+    expect(compileSystemNumeric(leibniz).f(0, [2, 0], {})[1]).toBeCloseTo(-2, 8);
+  });
+
+  it('treats a declared name as one symbol and keeps x_1 the same as x₁', () => {
+    const indexed = parseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['x_1'],
+      rows: ['-x₁ + x_1'],
+    });
+    expect(indexed.stateVars).toEqual(['x1']);
+    expect(indexed.parameters).toEqual({});
+    expect(compileSystemNumeric(indexed).f(0, [3], {})[0]).toBeCloseTo(0, 8);
+
+    const named = parseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['pos'],
+      rows: ['-pos'],
+      userLyapunovExpr: 'pos^2 / 2',
+    });
+    expect(named.parameters).toEqual({});
+    expect(named.userLyapunovExpr).toBe('pos ^ 2 / 2');
+    expect(compileSystemNumeric(named).f(0, [4], {})[0]).toBeCloseTo(-4, 8);
+
+    const product = parseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['pos'],
+      rows: ['posx'],
+    });
+    expect(Object.keys(product.parameters)).toEqual(['x']);
+    expect(compileSystemNumeric(product).f(0, [2], { x: 5 })[0]).toBeCloseTo(10, 8);
+
+    const duplicate = tryParseSystem({
+      mode: 'autonomous',
+      dimension: 2,
+      stateVars: ['x1', 'x_1'],
+      rows: ['0', '0'],
+    });
+    expect(duplicate.ok).toBe(false);
+
+    const reserved = tryParseSystem({
+      mode: 'autonomous',
+      dimension: 1,
+      stateVars: ['sin'],
+      rows: ['0'],
+    });
+    expect(reserved.ok).toBe(false);
   });
 });
