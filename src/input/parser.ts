@@ -13,6 +13,7 @@ import {
   type MathNode,
 } from 'mathjs';
 import type { CompiledSystem, ParameterSpec, ParseSystemInput, SystemSpec } from '../core/types';
+import { isBuiltInFunction, prepareMath } from './expression';
 
 const CONSTANTS = new Set(['e', 'E', 'pi', 'PI', 'i', 'Infinity', 'NaN', 'true', 'false']);
 
@@ -41,28 +42,6 @@ const GREEK: Record<string, string> = {
   chi: '\\chi',
   psi: '\\psi',
   omega: '\\omega',
-};
-
-const LATEX_SYMBOLS: Record<string, string> = {
-  '\\alpha': 'alpha',
-  '\\beta': 'beta',
-  '\\gamma': 'gamma',
-  '\\delta': 'delta',
-  '\\epsilon': 'epsilon',
-  '\\varepsilon': 'epsilon',
-  '\\theta': 'theta',
-  '\\lambda': 'lambda',
-  '\\mu': 'mu',
-  '\\nu': 'nu',
-  '\\xi': 'xi',
-  '\\pi': 'pi',
-  '\\rho': 'rho',
-  '\\sigma': 'sigma',
-  '\\tau': 'tau',
-  '\\phi': 'phi',
-  '\\varphi': 'phi',
-  '\\psi': 'psi',
-  '\\omega': 'omega',
 };
 
 export type ParseResult = { ok: true; spec: SystemSpec } | { ok: false; error: string };
@@ -208,6 +187,7 @@ function finishSpec(
     }
   }
   const parameterNames = Object.keys(parameters);
+  const userLyapunovExpr = canonicalizeOptional(input.userLyapunovExpr, 'Lyapunov function');
   const isAutonomous = !rhsExpressions.some((expr) => expressionDependsOn(expr, independentVar));
   const isLinear = rhsExpressions.every((expr) => secondDerivativesVanish(expr, stateVars));
   const latexEquations = stateVars.map(
@@ -226,7 +206,7 @@ function finishSpec(
     parameters,
     isAutonomous,
     isLinear,
-    userLyapunovExpr: input.userLyapunovExpr,
+    userLyapunovExpr,
   };
 }
 
@@ -287,26 +267,18 @@ function expandSecondOrder(raw: string, position: string, velocity: string): [st
 }
 
 function normalizeMath(raw: string): string {
-  let text = raw.trim();
-  if (!text) return '';
-  text = text.replace(/[−–]/g, '-').replace(/π/g, 'pi').replace(/θ/g, 'theta').replace(/ω/g, 'omega').replace(/μ/g, 'mu');
-  text = text.replace(/\*\*/g, '^').replace(/²/g, '^2').replace(/³/g, '^3');
-  const latexNames = Object.keys(LATEX_SYMBOLS).sort((a, b) => b.length - a.length);
-  for (const latex of latexNames) {
-    text = text.replace(new RegExp(escapeRegExp(latex), 'g'), LATEX_SYMBOLS[latex] ?? latex);
+  return prepareMath(raw);
+}
+
+function canonicalizeOptional(raw: string | undefined, label: string): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  try {
+    return canonicalize(prepareMath(trimmed));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label}: ${message}`);
   }
-  text = text.replace(/\\ddot\{([A-Za-z_][A-Za-z0-9_]*)\}/g, "$1''");
-  text = text.replace(/\\ddot\s*([A-Za-z_][A-Za-z0-9_]*)/g, "$1''");
-  text = text.replace(/\\dot\{([A-Za-z_][A-Za-z0-9_]*)\}/g, "$1'");
-  text = text.replace(/\\dot\s*([A-Za-z_][A-Za-z0-9_]*)/g, "$1'");
-  text = text.replace(/\\frac\{d\^2\s*([A-Za-z_][A-Za-z0-9_]*)\}\{d[a-zA-Z]\^2\}/g, "$1''");
-  text = text.replace(/d\^2\s*([A-Za-z_][A-Za-z0-9_]*)\s*\/\s*d[a-zA-Z]\^2/g, "$1''");
-  text = text.replace(/\\frac\{d\s*([A-Za-z_][A-Za-z0-9_]*)\}\{d[a-zA-Z]\}/g, "$1'");
-  text = text.replace(/\bd\s*([A-Za-z_][A-Za-z0-9_]*)\s*\/\s*d[a-zA-Z]\b/g, "$1'");
-  text = text.replace(/(\d)\s*\(/g, '$1*(');
-  text = text.replace(/(\d)\s*([A-Za-z_])/g, '$1*$2');
-  text = text.replace(/\)\s*([A-Za-z_(])/g, ')*$1');
-  return text.trim();
 }
 
 function canonicalize(expr: string): string {
@@ -360,6 +332,9 @@ function collectSymbols(node: MathNode, into: Set<string>): void {
     const symbol = child as MathNode & { name: string };
     const owner = parent as (MathNode & { fn?: MathNode }) | undefined;
     if (parent?.type === 'FunctionNode' && owner?.fn === child) return;
+    if (isBuiltInFunction(symbol.name)) {
+      throw new Error(`"${symbol.name}" is a function and needs an argument, for example ${symbol.name}(x).`);
+    }
     into.add(symbol.name);
   });
 }
