@@ -88,11 +88,17 @@ export function makeField(
 
 /** A centred Dirac mass `dirac(x-a)`. Returns the centre, or null when the expression is not a pure delta. */
 export function diracCenter(raw: string): number | null {
-  const prepared = toMath(raw).replace(/\s+/g, '');
-  const match = prepared.match(/^dirac\((x|y)(?:-([+-]?(?:\d+\.?\d*|\d*\.?\d+)))?\)$/);
-  if (!match) {
-    if (prepared === 'dirac(x)' || prepared === 'dirac(y)') return 0;
+  let prepared: string;
+  try {
+    prepared = toMath(raw).replace(/\s+/g, '');
+  } catch {
     return null;
   }
-  return match[2] ? Number(match[2]) : 0;
+  if (!prepared.startsWith('dirac(') || !prepared.endsWith(')')) return null;
+  const inner = prepared.slice(6, -1).replace(/[()]/g, '');
+  if (inner === 'x' || inner === 'y') return 0;
+  const shifted = inner.match(/^(?:x|y)([+-]\d*\.?\d+)$/);
+  if (!shifted?.[1]) return null;
+  const delta = Number(shifted[1]);
+  return Number.isFinite(delta) ? -delta : null;
 }
