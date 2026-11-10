@@ -88,7 +88,7 @@ function solveCauchy(problem: CharProblem, params: Record<string, number>): Buil
   const domainX: [number, number] = [-5, 5];
   const domainT: [number, number] = [y0 - 3, y0 + 3];
   if (flat) {
-    const evaluate = (x: number, y: number) => level + Math.abs(y - y0) + (Number.isFinite(x) ? 0 : 0);
+    const evaluate = (x: number, y: number) => (Number.isFinite(x) ? level + Math.abs(y - y0) : Number.NaN);
     const feet = linspace(-4, 4, 6);
     const curves: CharCurve[] = feet.flatMap((x0, index) =>
       [-1, 1].map((sign) => ({
@@ -168,10 +168,11 @@ function solveCharpit(
           return [2 * p, 2 * q, 2 * (p * p + q * q), 0, 0];
         },
       });
-      const points = traced.t.map((parameter, index) => {
-        const state = traced.y[index] ?? [];
-        return { x: state[0] ?? x0, t: state[1] ?? parameter * 0 + (state[1] ?? y0), u: state[2] ?? g(x0) };
-      });
+      const points = traced.y.map((state) => ({
+        x: state[0] ?? x0,
+        t: state[1] ?? y0,
+        u: state[2] ?? g(x0),
+      }));
       curves.push({
         id: `ray-${curves.length}`,
         invariantLatex: `p=${texNum(p0)},\\ q=${texNum(sign * qAbs)}`,

@@ -103,11 +103,12 @@ function pdeResidual(problem: CharProblem, built: BuiltChar): number {
   const [x0, x1] = built.domainX;
   const [t0, t1] = built.domainT;
   const samples: number[] = [];
+  const coeff = built.residualKind === 'linear' ? compileCoefficients(problem) : null;
   for (let i = 1; i <= 4; i += 1) {
     for (let j = 1; j <= 4; j += 1) {
       const x = x0 + ((x1 - x0) * i) / 5;
       const tau = t0 + ((t1 - t0) * j) / 5;
-      const value = localResidual(problem, built, x, tau);
+      const value = localResidual(problem, built, x, tau, coeff);
       if (value !== null) samples.push(value);
     }
   }
@@ -115,7 +116,18 @@ function pdeResidual(problem: CharProblem, built: BuiltChar): number {
   return Math.max(...samples);
 }
 
-function localResidual(problem: CharProblem, built: BuiltChar, x: number, tau: number): number | null {
+function localResidual(
+  problem: CharProblem,
+  built: BuiltChar,
+  x: number,
+  tau: number,
+  coeff: {
+    a: (scope: Record<string, number>) => number;
+    b: (scope: Record<string, number>) => number;
+    c: (scope: Record<string, number>) => number;
+    d: (scope: Record<string, number>) => number;
+  } | null,
+): number | null {
   const h = 1e-4;
   const f = built.evaluate;
   const centre = f(x, tau);
@@ -138,11 +150,12 @@ function localResidual(problem: CharProblem, built: BuiltChar, x: number, tau: n
     if (Math.abs(tau) < 1e-3) return null;
     return Math.abs(ut + centre * ux);
   }
+  if (!coeff) return null;
   const scope = coefficientScope(problem, x, tau, centre);
-  const a = readCoeff(problem.aExpr, scope);
-  const b = readCoeff(problem.bExpr, scope);
-  const c = readCoeff(problem.cExpr, scope);
-  const d = readCoeff(problem.dExpr, scope);
+  const a = coeff.a(scope);
+  const b = coeff.b(scope);
+  const c = coeff.c(scope);
+  const d = coeff.d(scope);
   if (![a, b, c, d].every(Number.isFinite)) return null;
   return Math.abs(a * ux + b * ut + c * centre - d);
 }
@@ -209,6 +222,22 @@ function artifactOnly(aExpr: string, cExpr: string, params: Record<string, numbe
   } catch {
     return false;
   }
+}
+
+function compileCoefficients(problem: CharProblem): {
+  a: (scope: Record<string, number>) => number;
+  b: (scope: Record<string, number>) => number;
+  c: (scope: Record<string, number>) => number;
+  d: (scope: Record<string, number>) => number;
+} {
+  const compile = (expr: string) => {
+    const fn = compileMath(expr, ['x', 't', 'y', 'u', 'U', 'UX']);
+    return (scope: Record<string, number>) => {
+      const value = fn(scope);
+      return Number.isFinite(value) ? value : Number.NaN;
+    };
+  };
+  return { a: compile(problem.aExpr), b: compile(problem.bExpr), c: compile(problem.cExpr), d: compile(problem.dExpr) };
 }
 
 function coefficientScope(problem: CharProblem, x: number, tau: number, u: number): Record<string, number> {
