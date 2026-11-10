@@ -27,7 +27,9 @@ export type PdeTag =
   | 'rectangle'
   | 'source'
   | 'compatibility'
-  | 'boundary-regions';
+  | 'boundary-regions'
+  | 'classification'
+  | 'energy';
 
 export interface EndCondition {
   kind: 'dirichlet' | 'neumann' | 'robin';
@@ -88,7 +90,49 @@ export interface CharProblem {
   equationLatex: string;
 }
 
-export type PdeProblem = HeatProblem | CharProblem;
+export interface ClassProblem {
+  family: 'classify';
+  /** Coefficients of u_xx, u_xy, u_yy in A u_xx + B u_xy + C u_yy = 0. */
+  aExpr: string;
+  bExpr: string;
+  cExpr: string;
+  /** True when a first-order or zero-order term is present. */
+  lowerOrder: boolean;
+  parameters: Record<string, ParameterSpec>;
+  lines: string[];
+  equationLatex: string;
+}
+
+export interface ClassFamilyLine {
+  id: string;
+  label: string;
+  formulaLatex: string;
+  /** dy/dx. Null means a vertical line. */
+  slope: number | null;
+}
+
+export interface ClassSolution {
+  family: 'classify';
+  exact: boolean;
+  formulaLatex: string;
+  generalLatex: string;
+  canonicalLatex: string;
+  type: 'hyperbolic' | 'parabolic' | 'elliptic';
+  delta: number;
+  deltaLatex: string;
+  families: ClassFamilyLine[];
+  frames: FieldFrame[];
+  objects: PdeObject[];
+  notes: NoteBlock[];
+  workedLatex: string;
+  features: PdeTag[];
+  warnings: string[];
+  a: number;
+  b: number;
+  c: number;
+}
+
+export type PdeProblem = HeatProblem | CharProblem | ClassProblem;
 
 export interface PdeObject {
   id: string;
@@ -213,7 +257,7 @@ export interface CharSolution {
   transversalityLatex: string;
 }
 
-export type PdeSolution = HeatSolution | CharSolution;
+export type PdeSolution = HeatSolution | CharSolution | ClassSolution;
 
 export interface CheckReport {
   ok: boolean;
@@ -235,6 +279,8 @@ export interface PdeExample {
   tags: PdeTag[];
   /** Closed form in the problem's variables and parameters, when one is part of the exercise. */
   formula?: string;
+  /** Kept in the source list, hidden from the gallery until it is fast and safe. */
+  parked?: boolean;
 }
 
 export const DEFAULT_PDE_LINES = [

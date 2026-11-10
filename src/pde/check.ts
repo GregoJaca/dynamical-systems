@@ -28,8 +28,9 @@ export function checkAnswer(problem: PdeProblem, solution: PdeSolution, userExpr
   const boundaryResidual = boundaryError(problem, params, user);
   const differenceFromTool = maxOf(samples.compare, (x, t, y) => Math.abs(user(x, t, y) - tool(x, t, y)));
   const diagnoses = diagnose(problem, solution, user, tool, differenceFromTool);
-  const ok = pdeResidual < PDE_TOL && boundaryResidual < PDE_TOL && initialResidual < IC_TOL && differenceFromTool < PDE_TOL;
-  return { ok, pdeResidual, initialResidual, boundaryResidual, differenceFromTool, diagnoses: ok ? [] : diagnoses };
+  const difference = problem.family === 'classify' ? 0 : differenceFromTool;
+  const ok = pdeResidual < PDE_TOL && boundaryResidual < PDE_TOL && initialResidual < IC_TOL && difference < PDE_TOL;
+  return { ok, pdeResidual, initialResidual, boundaryResidual, differenceFromTool: difference, diagnoses: ok ? [] : diagnoses };
 }
 
 function diagnose(
@@ -113,6 +114,15 @@ function robinDiagnosis(problem: PdeProblem, user: (x: number, t: number) => num
 
 function pdeAt(problem: PdeProblem, params: Record<string, number>, user: (x: number, t: number, y?: number) => number, x: number, t: number, y: number): number {
   const h = 1e-4;
+  if (problem.family === 'classify') {
+    const A = evalMath(problem.aExpr, params);
+    const B = evalMath(problem.bExpr, params);
+    const C = evalMath(problem.cExpr, params);
+    const uxx = (user(x + h, 0, y) - 2 * user(x, 0, y) + user(x - h, 0, y)) / (h * h);
+    const uyy = (user(x, 0, y + h) - 2 * user(x, 0, y) + user(x, 0, y - h)) / (h * h);
+    const uxy = (user(x + h, 0, y + h) - user(x + h, 0, y - h) - user(x - h, 0, y + h) + user(x - h, 0, y - h)) / (4 * h * h);
+    return A * uxx + B * uxy + C * uyy;
+  }
   if (problem.family === 'heat') {
     const ut = (user(x, t + h, y) - user(x, t - h, y)) / (2 * h);
     const ux = (user(x + h, t, y) - user(x - h, t, y)) / (2 * h);
@@ -152,6 +162,7 @@ function pdeAt(problem: PdeProblem, params: Record<string, number>, user: (x: nu
 }
 
 function initialError(problem: PdeProblem, params: Record<string, number>, user: (x: number, t: number, y?: number) => number): number {
+  if (problem.family === 'classify') return 0;
   if (problem.family === 'heat') {
     const g = makeField(problem.initialExpr, ['x', 'y', 't', 'r'], params);
     if (problem.domain.kind === 'rectangle') {
@@ -181,6 +192,7 @@ function initialError(problem: PdeProblem, params: Record<string, number>, user:
 }
 
 function boundaryError(problem: PdeProblem, params: Record<string, number>, user: (x: number, t: number) => number): number {
+  if (problem.family === 'classify') return 0;
   if (problem.family === 'heat') {
     if (problem.domain.kind === 'interval' && !problem.domain.periodic) {
       const left = evalMath(problem.domain.leftExpr, params);

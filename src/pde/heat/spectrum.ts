@@ -43,7 +43,60 @@ export function intervalSpectrum(k: number, left: number, right: number, ends: I
   if (ends.left === 'neumann' && ends.right === 'dirichlet') return halfRange(k, left, length, count, 'cos');
   if (ends.left === 'dirichlet' && ends.right === 'robin') return dirichletRobin(k, left, length, count, ends.hRight ?? 0, 'right');
   if (ends.left === 'robin' && ends.right === 'dirichlet') return dirichletRobin(k, left, length, count, ends.hLeft ?? 0, 'left');
+  if (ends.left === 'robin' && ends.right === 'neumann') return robinNeumann(k, left, length, count, ends.hLeft ?? 0);
+  if (ends.left === 'neumann' && ends.right === 'robin') return robinNeumann(k, left, length, count, ends.hRight ?? 0, true);
   return [];
+}
+
+/** u_x + h u = 0 at the left (or at the right when `flip` is set) and u_x = 0 at the other end. */
+function robinNeumann(k: number, left: number, length: number, count: number, h: number, flip = false): SpectralMode[] {
+  const modes: SpectralMode[] = [];
+  const mus = robinNeumannMu(h, length, count);
+  mus.forEach((mu, index) => {
+    const phi = (x: number) => {
+      const z = flip ? left + length - x : x - left;
+      return Math.cos(mu * z) - (h / mu) * Math.sin(mu * z);
+    };
+    const norm = simpson((x) => phi(x) * phi(x), left, left + length);
+    if (!(norm > 1e-8)) return;
+    modes.push({
+      n: index + 1,
+      mu,
+      lambda: k * mu * mu,
+      norm,
+      family: 'sinh',
+      phi,
+      dphi: (x) => {
+        const z = flip ? left + length - x : x - left;
+        const sign = flip ? -1 : 1;
+        return sign * (-mu * Math.sin(mu * z) - h * Math.cos(mu * z));
+      },
+      phiLatex: `\\cos(\\mu x)-(h/\\mu)\\sin(\\mu x),\\ \\mu\\approx ${trimNumber(mu)}`,
+      growing: false,
+    });
+  });
+  return modes;
+}
+
+function robinNeumannMu(h: number, length: number, count: number): number[] {
+  if (count <= 0 || !(length > 0) || Math.abs(h) < 1e-12) return [];
+  const f = (theta: number) => theta * Math.sin(theta) + h * length * Math.cos(theta);
+  const df = (theta: number) => Math.sin(theta) + theta * Math.cos(theta) - h * length * Math.sin(theta);
+  const roots: number[] = [];
+  const limit = (count + 2) * Math.PI;
+  const steps = Math.max(2400, count * 500);
+  let previous = 1e-4;
+  let previousValue = f(previous);
+  for (let i = 1; i <= steps && roots.length < count; i += 1) {
+    const theta = (limit * i) / steps;
+    const value = f(theta);
+    if (Number.isFinite(previousValue) && Number.isFinite(value) && previousValue * value < 0) {
+      roots.push(newtonInBracket(f, df, previous, theta));
+    }
+    previous = theta;
+    previousValue = value;
+  }
+  return roots.map((theta) => theta / length);
 }
 
 export function periodicSpectrum(k: number, left: number, length: number, count: number): SpectralMode[] {

@@ -8,7 +8,7 @@ import type { ParameterSpec } from '../core/types';
 import { symbolToLatex } from '../input/parser';
 import { isBuiltInFunction } from '../input/expression';
 import { evalMath, mentions, toMath } from './expr';
-import type { CharProblem, EndCondition, HeatProblem, PdeProblem } from './types';
+import type { CharProblem, ClassProblem, EndCondition, HeatProblem, PdeProblem } from './types';
 
 const FIELD = ['UXX', 'UYY', 'UXY', 'UTT', 'UX', 'UY', 'UT', 'U'];
 const RESERVED = new Set(['x', 'y', 't', 'u', 'r', 'pi', 'e', 'E', 'i', ...FIELD]);
@@ -22,10 +22,13 @@ interface LineBag {
 }
 
 export function parseProblem(input: string[] | string, overrides?: Record<string, Partial<ParameterSpec>>): PdeProblem {
-  const lines = (Array.isArray(input) ? input : input.split(/\r?\n/)).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+  const raw = Array.isArray(input) ? input.join('\n') : input;
+  const lines = preprocess(raw)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !/^[,&]+$/.test(line));
   const bag = classifyLines(lines);
   if (!bag.equation) throw new Error('Write the PDE on its own line, for example u_t = k u_xx.');
-  if (!bag.domain) throw new Error('Write the domain on its own line, for example 0 < x < pi, or x in R.');
 
   const shielded = shieldDerivatives(bag.equation);
   const prepared = toMath(shielded, FIELD);
@@ -34,14 +37,25 @@ export function parseProblem(input: string[] | string, overrides?: Record<string
   const zero = safeSimplify(`(${prepared.slice(0, eq)}) - (${prepared.slice(eq + 1)})`);
   const coefficients = {
     ut: diff(zero, 'UT'),
+    utt: diff(zero, 'UTT'),
     ux: diff(zero, 'UX'),
     uy: diff(zero, 'UY'),
     uxx: diff(zero, 'UXX'),
     uyy: diff(zero, 'UYY'),
+    uxy: diff(zero, 'UXY'),
     u: diff(zero, 'U'),
   };
-  const remainder = substitute(zero, { UT: '0', UX: '0', UY: '0', UXX: '0', UYY: '0', U: '0' });
-  const second = !isZero(coefficients.uxx) || !isZero(coefficients.uyy);
+  const remainder = substitute(zero, { UT: '0', UX: '0', UY: '0', UXX: '0', UYY: '0', UXY: '0', UTT: '0', U: '0' });
+  const spatialSecond = !isZero(coefficients.uxx) || !isZero(coefficients.uyy) || !isZero(coefficients.uxy);
+  const second = spatialSecond || !isZero(coefficients.utt);
+  if (spatialSecond && isZero(coefficients.ut) && isZero(coefficients.utt)) {
+    if (!bag.domain) bag.domain = 'x in R';
+    const parameters = collectParameters(bag, zero, [], bag.conditions, overrides);
+    widenClassification(parameters);
+    return finishClass(bag, lines, coefficients, parameters, bag.equation);
+  }
+  if (!isZero(coefficients.utt)) throw new Error('This page does not solve wave equations yet.');
+  if (!bag.domain) throw new Error('Write the domain on its own line, for example 0 < x < pi, or x in R.');
   const eikonal = !second && isZero(coefficients.ut) && mentions(coefficients.ux, 'UX') && mentions(coefficients.uy, 'UY');
   const heat = second;
   const domain = readDomain(bag.domain);
@@ -55,6 +69,33 @@ export function parseProblem(input: string[] | string, overrides?: Record<string
     return finishChar(bag, lines, coefficients, remainder, domain, parameters, bag.equation, eikonal);
   }
   throw new Error('The equation has no derivative of u. Write u_t, u_x, or u_xx.');
+}
+
+function finishClass(
+  bag: LineBag,
+  lines: string[],
+  coefficients: Record<string, string>,
+  parameters: Record<string, ParameterSpec>,
+  original: string,
+): ClassProblem {
+  const lowerOrder = !isZero(coefficients.ux) || !isZero(coefficients.uy) || !isZero(coefficients.u);
+  return {
+    family: 'classify',
+    aExpr: coefficients.uxx ?? '0',
+    bExpr: coefficients.uxy ?? '0',
+    cExpr: coefficients.uyy ?? '0',
+    lowerOrder,
+    parameters,
+    lines,
+    equationLatex: equationLatex(original),
+  };
+  void bag;
+}
+
+function widenClassification(parameters: Record<string, ParameterSpec>): void {
+  const alpha = parameters.alpha;
+  if (!alpha) return;
+  parameters.alpha = { ...alpha, min: -2, max: 12, step: 0.05 };
 }
 
 function finishHeat(
@@ -118,7 +159,17 @@ function finishChar(
   const aExpr = coefficients.ux ?? '0';
   const cExpr = coefficients.u ?? '0';
   const dExpr = safeSimplify(`-(${remainder})`);
+  let cClean = cExpr;
   const quasilinear = mentions(aExpr, 'U') || mentions(bExpr, 'U') || mentions(cExpr, 'U');
+  if (quasilinear && !isZero(aExpr)) {
+    try {
+      const slope = derivative(aExpr, 'U').toString();
+      const gap = safeSimplify(`(${cExpr}) - (${slope}) * UX`);
+      if (isZero(gap)) cClean = '0';
+    } catch {
+      cClean = cExpr;
+    }
+  }
   const conditions = bag.conditions.map(readCondition);
   const data = readCharData(conditions, domain);
 
@@ -127,7 +178,7 @@ function finishChar(
     vars,
     aExpr,
     bExpr,
-    cExpr,
+    cExpr: cClean,
     dExpr,
     quasilinear,
     fluxExpr: fluxOf(aExpr, bExpr, cExpr, dExpr, quasilinear),
@@ -282,7 +333,7 @@ function readDomain(line: string): DomainRead {
   const text = line.trim();
   const bc = /neumann/i.test(text) ? 'neumann' : 'dirichlet';
   const blank: DomainRead = { kind: 'line', left: '0', right: '1', radius: '1', x0: '0', x1: '1', y0: '0', y1: '1', bc, expressions: [] };
-  if (/\b(R|whole\s+line|real\s+line)\b|x\s*(in|∈)\s*R|\\mathbb\{R\}|-∞|infinity/i.test(text) && !/</.test(text)) {
+  if (/\b(R|whole\s+line|real\s+line)\b|x\s*(in|∈)\s*R|mathbb\s*\{\s*R\s*\}|-∞|infinity/i.test(text) && !/[<]/.test(text.replace(/t\s*>+\s*-?\d+/gi, ''))) {
     return { ...blank, kind: 'line' };
   }
   if (/disk|circle|x\s*\^\s*2\s*\+\s*y\s*\^\s*2|^r\s*</i.test(text)) {
@@ -293,6 +344,9 @@ function readDomain(line: string): DomainRead {
     return { ...blank, kind: 'disk', radius: toMath(radius), expressions: [toMath(radius)] };
   }
   const halves = text.split(',');
+  if (halves.length === 2 && halves.some((part) => /\bin\b|∈|mathbb/i.test(part))) {
+    return { ...blank, kind: 'line' };
+  }
   if (halves.length === 2) {
     const xPart = boundPair(halves[0] ?? '', 'x');
     const yPart = boundPair(halves[1] ?? '', 'y');
@@ -327,7 +381,7 @@ function classifyLines(lines: string[]): LineBag {
       continue;
     }
     if (isDomainLine(line)) {
-      bag.domain = line;
+      if (!bag.domain) bag.domain = line;
       continue;
     }
     if (/^u(?:_?x)?\s*\(/i.test(line)) {
@@ -421,7 +475,7 @@ function shieldDerivatives(input: string): string {
   text = text.replace(/∂²u\/∂y²|u_\{yy\}/gi, 'UYY');
   text = text.replace(/u_xx|uxx/gi, 'UXX');
   text = text.replace(/u_yy|uyy/gi, 'UYY');
-  text = text.replace(/u_xy/gi, 'UXY');
+  text = text.replace(/u_\{xy\}|u_xy|∂²u\/∂x∂y/gi, 'UXY');
   text = text.replace(/u_tt/gi, 'UTT');
   text = text.replace(/u_\{x\}|∂u\/∂x|u_x|\bux\b/gi, 'UX');
   text = text.replace(/u_\{y\}|∂u\/∂y|u_y|\buy\b/gi, 'UY');
@@ -521,4 +575,24 @@ function splitArgs(text: string): string[] {
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Turn a pasted exam block into the line form the rest of the parser reads. */
+export function preprocess(input: string): string {
+  let text = input.replace(/\r/g, '');
+  text = text.replace(/\$\$|\$|\\\(|\\\)|\\\[|\\\]/g, '');
+  text = text.replace(/\\begin\{(?:cases|aligned|align|gather|array)\*?\}(?:\{[^}]*\})?/g, '\n');
+  text = text.replace(/\\end\{(?:cases|aligned|align|gather|array)\*?\}/g, '\n');
+  text = text.replace(/\\\\/g, '\n');
+  text = text.replace(/\\mathbb\{R\}/g, 'R');
+  text = text.replace(/\\in\b/g, 'in');
+  text = text.replace(/\\(sin|cos|tan|exp|ln|log|sqrt|pi|alpha|beta|gamma|delta|epsilon|lambda|mu|nu|sigma|omega|kappa)\b/g, '$1');
+  text = text.replace(/\\[a-zA-Z]+/g, ' ');
+  text = text.replace(/[{}]/g, '');
+  text = text.replace(/&/g, ' ');
+  text = text.replace(/≤/g, '<=');
+  text = text.replace(/≥/g, '>=');
+  text = text.replace(/[−–]/g, '-');
+  text = text.replace(/∈/g, ' in ');
+  return text;
 }

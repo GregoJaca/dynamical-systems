@@ -4,8 +4,10 @@
  */
 
 import type { PdeExample } from '../types';
+import { COURSE_EXAMPLES } from './course';
 
 export const PDE_EXAMPLES: PdeExample[] = [
+  ...COURSE_EXAMPLES,
   {
     id: 'heat-mass-decay',
     title: 'Mass stays, height falls',
@@ -75,6 +77,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     lines: ['u_t + u u_x = nu u_xx', 'x in R', 'u(x, 0) = 1/(1+exp(x/(2*nu)))', 'nu = 0.05'],
     tags: ['cole-hopf'],
     formula: '1/(1+exp((x-t/2)/(2*nu)))',
+    parked: true,
   },
   {
     id: 'heat-kernel',
@@ -184,6 +187,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     lines: ['u_t + u u_x = 1', 'x in R', 'u(x, 0) = -x/2'],
     tags: ['characteristics'],
     formula: 't - (x - t^2/2)/(2 - t)',
+    parked: true,
   },
   {
     id: 'char-monodromy',
@@ -204,6 +208,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     lines: ['u_x + u_y = u^4', 'x in R', 'u(x, 0) = 1'],
     tags: ['characteristics'],
     formula: '(1-3*y)^(-1/3)',
+    parked: true,
   },
   {
     id: 'char-implicit',
@@ -213,6 +218,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     blurb: 'The initial value u(x, 0) = x is constant along characteristics and is carried to the implicit relation x = u e^{-u y}, which is not an elementary function of (x, y).',
     lines: ['u_y = x u u_x', 'x in R', 'u(x, 0) = x'],
     tags: ['characteristics'],
+    parked: true,
   },
   {
     id: 'char-variable-speed',
@@ -222,6 +228,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     blurb: 'From u(x, 0) = x the characteristic foot satisfies a Lambert equation z e^{-z} = constant, so the solution is explicit only after that inversion.',
     lines: ['u_x + (x+y) u_y = x y', 'x in R', 'u(x, 0) = x'],
     tags: ['characteristics'],
+    parked: true,
   },
   {
     id: 'nonlinear-strip',
@@ -232,6 +239,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     lines: ['x u_x + y u_y + u_x u_y - u = 0', 'x in R', 'u(x, 0) = x + 1'],
     tags: ['characteristics'],
     formula: 'x + y + 1',
+    parked: true,
   },
   {
     id: 'nonlinear-slope-cube',
@@ -242,6 +250,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     lines: ['u_y = u_x^3', 'x in R', 'u(x, 0) = 2 x^(3/2)'],
     tags: ['characteristics'],
     formula: '2*x^(3/2)/sqrt(1-27*y)',
+    parked: true,
   },
   {
     id: 'nonlinear-hamilton-jacobi',
@@ -252,6 +261,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
     lines: ['u = x u_x + y u_y + (1/2) (u_x^2 + u_y^2)', 'x in R', 'u(x, 0) = (1 - x^2)/2'],
     tags: ['characteristics'],
     formula: '(1 - x^2)/2 + y',
+    parked: true,
   },
   {
     id: 'demo-robin',

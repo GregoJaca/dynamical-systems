@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
 import type { FieldFrame } from '../types';
 import { emphasis, viridis } from './colors';
-import { midY, sampleFrame } from './exportView';
+import { midY, sampleFrame, sampleMode } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
 const MARGIN = { left: 46, right: 14, top: 12, bottom: 32 };
@@ -179,6 +179,7 @@ export function Heatmap() {
   const setCursor = usePdeStore((state) => state.setCursor);
   const setX0 = usePdeStore((state) => state.setX0);
   const setT0 = usePdeStore((state) => state.setT0);
+  const partialN = usePdeStore((state) => state.partialN);
   const frame = solution?.family === 'heat' ? activeFrame(solution, frameId) : null;
   const spatial = solution?.family === 'heat' ? solution.spatial : 'x';
 
@@ -197,13 +198,14 @@ export function Heatmap() {
         hidden,
         selectedId,
         hoverId,
+        partialN,
       });
     };
     const observer = new ResizeObserver(paint);
     observer.observe(canvas);
     paint();
     return () => observer.disconnect();
-  }, [solution, frame, theme, x0, t0, hidden, selectedId, hoverId]);
+  }, [solution, frame, theme, x0, t0, hidden, selectedId, hoverId, partialN]);
 
   if (!frame || solution?.family !== 'heat') return null;
 
@@ -292,9 +294,19 @@ function drawHeat(
     hidden: string[];
     selectedId: string | null;
     hoverId: string | null;
+    partialN: number;
   },
 ) {
-  const { solution, frame, theme, x0, t0, hidden, selectedId, hoverId } = props;
+  const { solution, frame, theme, x0, t0, hidden, selectedId, hoverId, partialN } = props;
+  const pickedMode = solution.modes.find((mode) => mode.id === selectedId || mode.id === hoverId) ?? null;
+  const shownModes = solution.modes.slice(0, Math.max(1, Math.min(partialN, solution.modes.length)));
+  const sample = (x: number, t: number, y?: number) => {
+    if (pickedMode) return sampleMode(pickedMode, x, t, y);
+    if (solution.spatial !== 'x' && solution.modes.length > 0 && shownModes.length < solution.modes.length) {
+      return shownModes.reduce((sum, mode) => sum + sampleMode(mode, x, t, y), 0);
+    }
+    return sampleFrame(frame, x, t, y);
+  };
   const palette = PALETTE[theme];
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
@@ -386,17 +398,24 @@ function drawHeat(
   for (let i = 0; i < nx; i += 1) xs.push(xMin + ((xMax - xMin) * i) / (nx - 1));
   for (let j = 0; j < ny; j += 1) ys.push(yMin + ((yMax - yMin) * j) / (ny - 1));
   const flat = new Float64Array(nx * ny);
+  let refMin = Infinity;
+  let refMax = -Infinity;
   for (let j = 0; j < ny; j += 1) {
     const row: number[] = [];
     for (let i = 0; i < nx; i += 1) {
       const x = xs[i]!;
       const yValue = ys[j]!;
       let value = Number.NaN;
+      let reference = Number.NaN;
       if (solution.spatial === 'radial') {
         const r = Math.hypot(x, yValue);
-        if (r <= radius) value = sampleFrame(frame, r, t0);
+        if (r <= radius) {
+          value = sample(r, t0);
+          reference = sample(r, frame.tMin);
+        }
       } else {
-        value = sampleFrame(frame, x, t0, yValue);
+        value = sample(x, t0, yValue);
+        reference = sample(x, frame.tMin, yValue);
       }
       row.push(value);
       flat[j * nx + i] = value;
@@ -404,10 +423,17 @@ function drawHeat(
         if (value < min) min = value;
         if (value > max) max = value;
       }
+      if (Number.isFinite(reference)) {
+        if (reference < refMin) refMin = reference;
+        if (reference > refMax) refMax = reference;
+      }
     }
     grid.push(row);
   }
-  paintField(ctx, flat, nx, ny, min, max, box, fieldMark.draw ? fieldMark.alpha : 0);
+  const scaleMin = Number.isFinite(refMin) && refMax > refMin + 1e-8 ? refMin : min;
+  const scaleMax = Number.isFinite(refMax) && refMax > refMin + 1e-8 ? refMax : max;
+  const alpha = pickedMode ? 1 : fieldMark.draw ? fieldMark.alpha : 0;
+  paintField(ctx, flat, nx, ny, scaleMin, scaleMax, box, alpha);
   if (Number.isFinite(min) && Number.isFinite(max) && max > min) {
     ctx.save();
     ctx.beginPath();
@@ -441,6 +467,14 @@ function drawHeat(
       ctx.stroke();
     }
     ctx.setLineDash([]);
+    const boundary = solution.objects.find((object) => object.group === 'boundary');
+    const boundaryMark = boundary ? emphasis(boundary.id, selectedId, hoverId, hidden) : null;
+    if (boundaryMark?.draw && solution.spatial === 'xy') {
+      ctx.setLineDash([]);
+      ctx.strokeStyle = theme === 'dark' ? '#f3f1ec' : '#1c1917';
+      ctx.lineWidth = 2.4 * boundaryMark.scale;
+      ctx.strokeRect(xOf(frame.xMin), yOf(frame.yMax ?? frame.xMax), xOf(frame.xMax) - xOf(frame.xMin), yOf(frame.yMin ?? frame.xMin) - yOf(frame.yMax ?? frame.xMax));
+    }
     ctx.restore();
   }
   paintAxes(

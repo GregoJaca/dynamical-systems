@@ -50,6 +50,7 @@ const FEATURES: PdeTag[] = [
   'rectangle',
   'source',
   'compatibility',
+  'energy',
 ];
 
 interface Bundle {
@@ -110,7 +111,8 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
   if (!(length > 0) || bundle.k === null || !(bundle.k > 0) || bundle.b === null || bundle.c === null) {
     return numericInterval(problem, bundle, 'Variable or nonpositive coefficients are integrated numerically.', left, right);
   }
-  if (problem.numericOnly || mentions(problem.sourceExpr, 't')) {
+  const forcing = mentions(problem.sourceExpr, 't') ? matchExponentialSource(bundle, left, right) : null;
+  if (problem.numericOnly || (mentions(problem.sourceExpr, 't') && !forcing)) {
     return numericInterval(problem, bundle, 'The solver uses Crank–Nicolson for this coefficient or source.', left, right);
   }
 
@@ -190,12 +192,21 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
 
   const transientData = (x: number) => vInitial(x) - lift.w(x);
   const projected = projectAll(transientData, modes, left, right);
-  const sourceProjected = projectAll(lift.remaining, modes, left, right);
+  const sourceProjected = forcing ? projectAll(forcing.spatial, modes, left, right) : projectAll(lift.remaining, modes, left, right);
+  if (forcing) {
+    used.add('source');
+    notes.push({
+      id: 'forcing',
+      title: 'Time-dependent source',
+      latex: `The source is $e^{${trimNumber(forcing.c)} t}$ times a function of $x$. Mode $n$ solves $a'+\\lambda_n a=f_n e^{${trimNumber(forcing.c)} t}$.`,
+    });
+  }
   let rows = modes.map((mode, index) => ({
     mode,
     a0: projected.values[index]?.amplitude ?? 0,
     fn: sourceProjected.values[index]?.amplitude ?? 0,
     exact: (projected.values[index]?.exact ?? false) && (sourceProjected.values[index]?.exact ?? false),
+    forcingC: forcing ? forcing.c : null,
   }));
   const symmetry = detectSymmetry(transientData, left, right);
   if (symmetry) {
@@ -222,7 +233,7 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
 
   const series = (x: number, t: number) => {
     let sum = lift.growth * t + lift.w(x);
-    for (const row of rows) sum += coefficientAt(row.a0, row.fn, row.mode.lambda, t) * row.mode.phi(x);
+    for (const row of rows) sum += coefficientAt(row.a0, row.fn, row.mode.lambda, t, row.forcingC) * row.mode.phi(x);
     return sum;
   };
   const original = (x: number, t: number) => factor(x, t) * series(x, t);
@@ -232,6 +243,10 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
   const formula = seriesLatex(terms, lift, transformed, alpha, beta, k);
   const worked = workedSeparation(terms, left, right, length, k, ends, lift, transformed, alpha, beta);
   const nondim = sourceIsZero && bundle.sourceConstant === 0 && shouldNondimensionalize(k, left, right);
+  if (homogeneousEnergy(leftEnd, rightEnd)) {
+    used.add('energy');
+    notes.push({ id: 'energy', title: 'Uniqueness', latex: energyLatex(k, leftEnd, rightEnd) });
+  }
   if (nondim) {
     used.add('nondimensional');
     notes.push({
@@ -477,7 +492,28 @@ function solveRectangle(problem: HeatProblem, bundle: Bundle): HeatSolution {
   const formula = 'u(x,y,t)=\\sum_{n,m} a_{nm} e^{-\\lambda_{nm} t}\\sin(n\\pi(x-x_0)/L_x)\\sin(m\\pi(y-y_0)/L_y)';
   const tMax = viewTime(terms[0]?.lambda);
   const original = frame('original', 'u', formula, 'x', 't', x0, x1, 0, tMax, false, evaluate, y0, y1, 'y');
-  const solution = blank(problem, 'product', true, formula, [original], terms, [], [], 'xy');
+  const leading = terms[0];
+  const modeNote = leading
+    ? `The series has ${terms.length} nonzero term${terms.length === 1 ? '' : 's'}. The slowest decay on a fixed colour scale is $e^{-${leading.lambdaLatex} t}$.`
+    : 'No mode passed the threshold.';
+  const termLatex = terms
+    .slice(0, 4)
+    .map((mode) => `${mode.amplitudeLatex}\\,e^{-${mode.lambdaLatex} t}\\,${mode.phiLatex}`)
+    .join('\\\\ ');
+  const solution = blank(
+    problem,
+    'product',
+    true,
+    formula,
+    [original],
+    terms,
+    [
+      { id: 'modes', title: 'Modes that are actually present', latex: termLatex || modeNote },
+      { id: 'decay', title: 'What the picture should show', latex: modeNote },
+    ],
+    [],
+    'xy',
+  );
   solution.objects = modeObjects(formula, terms);
   solution.features = orderFeatures(new Set<PdeTag>(['separation', 'rectangle']));
   solution.lambda1 = terms[0]?.lambda;
@@ -733,8 +769,6 @@ function transformEnd(end: EndCondition, alpha: number, beta: number, at: number
 function classifyEnds(left: EndData, right: EndData): IntervalEnds | null {
   if (left.timeDependent || right.timeDependent) return null;
   if (left.kind === 'robin' && right.kind === 'robin') return null;
-  if (left.kind === 'robin' && right.kind === 'neumann') return null;
-  if (left.kind === 'neumann' && right.kind === 'robin') return null;
   return { left: left.kind, right: right.kind, hLeft: left.h, hRight: right.h };
 }
 
@@ -842,6 +876,7 @@ interface RowDraft {
   a0: number;
   fn: number;
   exact: boolean;
+  forcingC?: number | null;
 }
 
 function projectAll(g: (x: number) => number, modes: SpectralMode[], left: number, right: number): { values: Array<{ amplitude: number; exact: boolean }> } {
@@ -852,10 +887,15 @@ function projectAll(g: (x: number) => number, modes: SpectralMode[], left: numbe
   return { values: modes.map((mode) => projectMode(g, mode, left, right)) };
 }
 
-function coefficientAt(a0: number, fn: number, lambda: number, t: number): number {
+function coefficientAt(a0: number, fn: number, lambda: number, t: number, forcingC?: number | null): number {
   const decay = Math.exp(-lambda * t);
-  if (Math.abs(lambda) < 1e-12) return a0 + fn * t;
-  return a0 * decay + (fn * (1 - decay)) / lambda;
+  if (forcingC == null) {
+    if (Math.abs(lambda) < 1e-12) return a0 + fn * t;
+    return a0 * decay + (fn * (1 - decay)) / lambda;
+  }
+  if (Math.abs(forcingC + lambda) < 1e-10) return (a0 + fn * t) * decay;
+  const grow = Math.exp(forcingC * t);
+  return a0 * decay + (fn * (grow - decay)) / (forcingC + lambda);
 }
 
 function toModeTerm(row: RowDraft, left: number): ModeTerm {
@@ -870,7 +910,7 @@ function toModeTerm(row: RowDraft, left: number): ModeTerm {
     numericAmplitude: !row.exact,
     phiLatex: row.mode.phiLatex,
     phi: (x) => row.mode.phi(x),
-    value: (x, t) => coefficientAt(row.a0, row.fn, row.mode.lambda, t) * row.mode.phi(x),
+    value: (x, t) => coefficientAt(row.a0, row.fn, row.mode.lambda, t, row.forcingC) * row.mode.phi(x),
   };
   void left;
 }
@@ -1069,7 +1109,7 @@ function modeObjects(formula: string, terms: ModeTerm[]): PdeObject[] {
       group: 'mode' as const,
       defaultOn: index < 4,
     })),
-    { id: 'boundary', label: 'Boundary', formulaLatex: 'homogeneous boundary', group: 'boundary', defaultOn: false },
+    { id: 'boundary', label: 'Boundary', formulaLatex: 'u=0\\ \\text{on the edge of the rectangle}', group: 'boundary', defaultOn: true },
   ];
 }
 
@@ -1599,6 +1639,48 @@ function constantExpr(expr: string, params: Record<string, number>): number | nu
   if (mentions(expr, 'x') || mentions(expr, 't') || mentions(expr, 'y') || mentions(expr, 'r') || mentions(expr, 'u')) return null;
   const value = evalMath(expr, params);
   return Number.isFinite(value) ? value : null;
+}
+
+function matchExponentialSource(
+  bundle: Bundle,
+  left: number,
+  right: number,
+): { c: number; spatial: (x: number) => number } | null {
+  const spatial = (x: number) => bundle.sourceOf(x, 0);
+  const probe = 0.35;
+  const xs = [0.2, 0.5, 0.8].map((s) => left + s * (right - left));
+  let rate: number | null = null;
+  let seen = false;
+  for (const x of xs) {
+    const base = spatial(x);
+    if (Math.abs(base) < 1e-8) continue;
+    const ratio = bundle.sourceOf(x, probe) / base;
+    if (!(ratio > 0)) return null;
+    const next = Math.log(ratio) / probe;
+    if (rate === null) rate = next;
+    else if (Math.abs(rate - next) > 1e-3 * (1 + Math.abs(rate))) return null;
+    seen = true;
+  }
+  if (!seen || rate === null) return null;
+  for (const x of xs) {
+    const base = spatial(x);
+    if (Math.abs(base) < 1e-8) continue;
+    const expected = base * Math.exp(rate * 0.7);
+    if (Math.abs(bundle.sourceOf(x, 0.7) - expected) > 1e-3 * (1 + Math.abs(expected))) return null;
+  }
+  return { c: rate, spatial };
+}
+
+function homogeneousEnergy(left: EndData, right: EndData): boolean {
+  return Math.abs(left.value) < 1e-10 && Math.abs(right.value) < 1e-10;
+}
+
+function energyLatex(k: number, left: EndData, right: EndData): string {
+  if (left.kind === 'robin' && right.kind === 'neumann' && (left.h ?? 0) < 0) {
+    const alpha = -(left.h ?? 0);
+    return `Multiply by $u$ and integrate. $\\frac{d}{dt}\\int u^2/2\\,dx=${trimNumber(k)}\\big(-\\alpha u(0)^2-\\int u_x^2\\big)$ with $\\alpha=${trimNumber(alpha)}>0$, so the energy cannot grow. The difference of two solutions has energy 0, hence the solution is unique.`;
+  }
+  return `With these homogeneous ends, $\\frac{d}{dt}\\int u^2\\,dx=-${trimNumber(2 * k)}\\int u_x^2\\,dx$ up to a nonpositive boundary term. Energy cannot grow, so the solution of the homogeneous problem is unique.`;
 }
 
 function sourceConstant(problem: HeatProblem, params: Record<string, number>): number | null {

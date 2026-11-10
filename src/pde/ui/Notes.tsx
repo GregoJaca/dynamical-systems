@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Katex } from '../../ui/Katex';
+import { RichText } from '../../ui/RichText';
 import { checkAnswer } from '../check';
 import { usePdeStore } from '../store';
 import type { CheckReport } from '../types';
@@ -60,9 +60,15 @@ export function Notes() {
       {solution.notes.map((note) => (
         <section key={note.id}>
           <h2>{note.title}</h2>
-          <Katex tex={note.latex} />
+          <RichText text={note.latex} />
         </section>
       ))}
+      {solution.workedLatex && (
+        <section>
+          <h2>Worked solution</h2>
+          <RichText text={solution.workedLatex} />
+        </section>
+      )}
       <section>
         <h2>Check an answer</h2>
         <textarea
@@ -88,7 +94,7 @@ export function Notes() {
             <p>The difference from this tool is {quantity(report.differenceFromTool)}.</p>
             {report.diagnoses.map((line) => (
               <p key={line}>
-                <Katex tex={line} />
+                <RichText text={line} />
               </p>
             ))}
           </>

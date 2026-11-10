@@ -22,8 +22,9 @@ export function Examples() {
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return PDE_EXAMPLES;
-    return PDE_EXAMPLES.filter((example) =>
+    const visible = PDE_EXAMPLES.filter((example) => !example.parked);
+    if (!needle) return visible;
+    return visible.filter((example) =>
       [example.title, example.id, example.source, example.blurb, example.group, ...example.lines].join(' ').toLowerCase().includes(needle),
     );
   }, [query]);

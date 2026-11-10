@@ -7,6 +7,7 @@ import { Notes } from './Notes';
 import { ObjectTree } from './ObjectTree';
 import { ProblemForm } from './ProblemForm';
 import { CharPlane } from '../render/CharPlane';
+import { ClassPlane } from '../render/ClassPlane';
 import { Heatmap } from '../render/Heatmap';
 import { Modes } from '../render/Modes';
 import { Profile } from '../render/Profile';
@@ -66,13 +67,17 @@ function Picture() {
           ) : null}
         </div>
       )}
-      <div className="portrait-primary">{solution.family === 'heat' ? <Heatmap /> : <CharPlane />}</div>
+      <div className="portrait-primary">
+        {solution.family === 'heat' ? <Heatmap /> : solution.family === 'classify' ? <ClassPlane /> : <CharPlane />}
+      </div>
       <div className="portrait-extras">
         {solution.family === 'heat' && active && solution.spatial === 'x' ? <Profile /> : null}
         {solution.family === 'heat' && solution.modes.length > 0 ? <Modes /> : null}
-        <Suspense fallback={<p className="status">Loading the surface…</p>}>
-          <Surface3D />
-        </Suspense>
+        {solution.family === 'classify' ? null : (
+          <Suspense fallback={<p className="status">Loading the surface…</p>}>
+            <Surface3D />
+          </Suspense>
+        )}
       </div>
     </div>
   );

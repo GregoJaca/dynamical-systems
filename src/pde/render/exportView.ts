@@ -83,6 +83,7 @@ export interface CurveLayer {
   id: string;
   latex: string;
   points: Array<[number, number]>;
+  values?: number[];
   kind: 'curve' | 'data' | 'shock' | 'envelope' | 'ray' | 'wavefront';
 }
 
@@ -122,12 +123,12 @@ export function charGraphics(solution: CharSolution): CharGraphics {
   const curves: CurveLayer[] = [];
   solution.curves.forEach((curve, index) => {
     const id = objects.some((object) => object.id === curve.id) ? curve.id : groupId(objects, 'characteristic', index, curve.id);
+    const finite = curve.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.t));
     curves.push({
       id,
-      latex: objectLatex(objects, id, curve.invariantLatex || curve.carriedLatex),
-      points: curve.points
-        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.t))
-        .map((point) => [point.x, point.t]),
+      latex: curve.carriedLatex || objectLatex(objects, id, curve.invariantLatex),
+      points: finite.map((point) => [point.x, point.t]),
+      values: finite.map((point) => point.u),
       kind: 'curve',
     });
   });
@@ -135,8 +136,9 @@ export function charGraphics(solution: CharSolution): CharGraphics {
     const id = objects.find((object) => object.group === 'boundary')?.id ?? objects.find((object) => /data/i.test(object.label))?.id ?? 'data';
     curves.push({
       id,
-      latex: objectLatex(objects, id, ''),
+      latex: objectLatex(objects, id, 'initial line'),
       points: solution.dataCurve.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.t)).map((point) => [point.x, point.t]),
+      values: solution.dataCurve.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.t)).map((point) => point.u),
       kind: 'data',
     });
   }
@@ -263,7 +265,7 @@ export function downloadSvg(): void {
     const cursorX = xOf(state.x0);
     parts.push(`<line x1="${cursorX}" y1="${margin.top}" x2="${cursorX}" y2="${height - margin.bottom}" stroke="${groupColor('ray', theme)}" stroke-width="1.2" />`);
     parts.push(`<text x="${margin.left}" y="16" fill="${ink}" font-family="Source Sans 3, sans-serif" font-size="14">${xml(frame.xName)}, ${xml(frame.tName)} = ${state.t0.toPrecision(3)}</text>`);
-  } else {
+  } else if (solution.family === 'characteristics') {
     const graphics = charGraphics(solution);
     const spanX = frame.xMax - frame.xMin || 1;
     const spanT = frame.tMax - frame.tMin || 1;

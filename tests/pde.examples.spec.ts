@@ -25,6 +25,8 @@ const ALLOWED_TAGS: readonly PdeTag[] = [
   'source',
   'compatibility',
   'boundary-regions',
+  'classification',
+  'energy',
 ];
 
 describe('PDE example corpus', () => {

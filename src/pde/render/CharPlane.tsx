@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
 import { Katex } from '../../ui/Katex';
 import type { CharSolution, FieldFrame } from '../types';
-import { emphasis, groupColor } from './colors';
+import { emphasis, groupColor, viridisCss } from './colors';
 import { charGraphics, type CurveLayer } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
@@ -169,24 +169,34 @@ function drawPlane(
     ctx.globalAlpha = 1;
     recorded.push({ id: region.id, tex: region.latex, points: region.polygon.map(([x, t]) => [xOf(x), tOf(t)]), region: true });
   }
+  const carried = graphics.curves.flatMap((curve) => curve.values ?? []).filter((value) => Number.isFinite(value));
+  const uMin = carried.length ? Math.min(...carried) : 0;
+  const uMax = carried.length ? Math.max(...carried) : 1;
   for (const curve of graphics.curves) {
     const mark = emphasis(curve.id, selectedId, hoverId, hidden);
     if (!mark.draw || curve.points.length < 2) continue;
-    ctx.beginPath();
     const pixels: Array<[number, number]> = [];
-    curve.points.forEach(([x, t], index) => {
-      const px = xOf(x);
-      const py = tOf(t);
-      pixels.push([px, py]);
-      if (index === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
     const base = curve.kind === 'data' || curve.kind === 'shock' ? 3.4 : curve.kind === 'envelope' ? 2 : 1.45;
-    ctx.strokeStyle = colorOf(curve.kind, theme);
     ctx.globalAlpha = mark.alpha;
     ctx.lineWidth = base * mark.scale;
     ctx.setLineDash(curve.kind === 'envelope' ? [7, 5] : []);
-    ctx.stroke();
+    for (let index = 1; index < curve.points.length; index += 1) {
+      const start = curve.points[index - 1]!;
+      const end = curve.points[index]!;
+      const x1 = xOf(start[0]);
+      const y1 = tOf(start[1]);
+      const x2 = xOf(end[0]);
+      const y2 = tOf(end[1]);
+      if (index === 1) pixels.push([x1, y1]);
+      pixels.push([x2, y2]);
+      const value = curve.values?.[index] ?? curve.values?.[index - 1];
+      const shade = value === undefined || uMax <= uMin ? null : (value - uMin) / (uMax - uMin);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = shade === null || curve.kind === 'data' ? colorOf(curve.kind, theme) : viridisCss(shade);
+      ctx.stroke();
+    }
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     recorded.push({ id: curve.id, tex: curve.latex, points: pixels, region: false });

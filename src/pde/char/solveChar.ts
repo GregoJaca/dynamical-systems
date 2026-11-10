@@ -205,6 +205,8 @@ function isConservation(problem: CharProblem): boolean {
   if (b === null || Math.abs(b) < 1e-12 || d === null || Math.abs(d) > 1e-10) return false;
   if (mentions(problem.aExpr, 'x') || mentions(problem.aExpr, 't') || mentions(problem.aExpr, 'y')) return false;
   if (!mentions(problem.aExpr, 'U') && !mentions(problem.aExpr, 'u')) return false;
+  const cleaned = problem.cExpr.replace(/\s+/g, '');
+  if ((cleaned === '0' || cleaned === '-0') && !mentions(problem.aExpr, 'UX')) return true;
   return artifactOnly(problem.aExpr, problem.cExpr, params);
 }
 

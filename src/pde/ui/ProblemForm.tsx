@@ -70,9 +70,9 @@ function charInitial(problem: CharProblem): string {
 
 function Readout({ problem }: { problem: PdeProblem }) {
   const equation = problem.equationLatex;
-  const domain = problem.family === 'heat' ? heatDomain(problem) : charDomain(problem);
-  const boundary = problem.family === 'heat' ? heatBoundary(problem) : problem.data.kind === 'strip' ? endLatex(problem.data.left) : null;
-  const initial = problem.family === 'heat' ? heatInitial(problem) : charInitial(problem);
+  const domain = problem.family === 'heat' ? heatDomain(problem) : problem.family === 'classify' ? '(x, y)' : charDomain(problem);
+  const boundary = problem.family === 'heat' ? heatBoundary(problem) : problem.family === 'characteristics' && problem.data.kind === 'strip' ? endLatex(problem.data.left) : null;
+  const initial = problem.family === 'heat' ? heatInitial(problem) : problem.family === 'classify' ? '\\text{no initial condition}' : charInitial(problem);
   return (
     <div className="system-preview">
       <Katex tex={equation} display />

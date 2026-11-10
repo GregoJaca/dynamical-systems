@@ -6,6 +6,7 @@
 import { integrateRK45 } from '../../numeric/rk45';
 import { compileMath, exprToLatex, mentions } from '../expr';
 import type { CharCurve, CharProblem, PdeObject } from '../types';
+import { solveAffine } from './affine';
 import type { BuiltChar } from './solveChar';
 import { constantOf, parameterValues } from './solveChar';
 
@@ -33,6 +34,8 @@ export function solveLinear(problem: CharProblem): BuiltChar {
       return solveDilation(problem, params, rate / bConst, cConst / bConst, dConst / bConst, tauName);
     }
   }
+  const affine = solveAffine(problem);
+  if (affine) return affine;
   if (problem.vars === 'xy') {
     const alpha = coefficientOf(problem.aExpr, 'x', params);
     const beta = coefficientOf(problem.bExpr, 'y', params);
@@ -324,16 +327,17 @@ function solveNumeric(problem: CharProblem, params: Record<string, number>, tauN
   const dFn = coefficientFunction(problem.dExpr, params, problem.vars);
   const evaluate = (x: number, tau: number): number => traceValue(x, tau, data, aFn, bFn, cFn, dFn);
   const curves = numericCurves(data, domain, aFn, bFn, cFn, dFn);
-  const warning = 'Characteristic curves are computed numerically.';
+  const warning = `The curves solve dx/d${tauName}=a/b and du/d${tauName}=(d-cu)/b numerically.`;
+  const ode = `\\frac{dx}{d${tauName}}=\\frac{a}{b},\\quad \\frac{du}{d${tauName}}=\\frac{d-cu}{b}`;
   return {
     exact: false,
-    formulaLatex: 'u\\ \\text{by integrating the characteristic ODEs}',
-    generalLatex: `\\frac{dx}{ds}=a,\\ \\frac{d${tauName}}{ds}=b,\\ \\frac{du}{ds}=d-c u`,
+    formulaLatex: ode,
+    generalLatex: ode,
     evaluate,
     curves,
     dataCurve: dataCurve(data, domain),
-    objects: baseObjects(`\\Gamma`),
-    notes: [{ id: 'numeric', title: 'Numeric characteristics', latex: warning }],
+    objects: baseObjects(ode, `u(x,${texNum(data.t0)})=${tex(data.gExpr)}`),
+    notes: [{ id: 'numeric', title: 'Characteristic ODEs', latex: `${ode}.\\ ${warning}` }],
     workedLatex: [
       problem.equationLatex,
       `The characteristic system is \\(dx/ds=a\\), \\(d${tauName}/ds=b\\), \\(du/ds=d-cu\\).`,
@@ -427,15 +431,23 @@ function coefficientOf(expr: string, variable: 'x' | 'y', params: Record<string,
 }
 
 function coefficientFunction(expr: string, params: Record<string, number>, vars: 'xt' | 'xy'): Scalar {
-  const fn = compileMath(expr, ['x', 't', 'y', 'u', 'U']);
+  let fn: ((scope: Record<string, number>) => number) | null = null;
+  try {
+    fn = compileMath(expr, ['x', 't', 'y', 'u', 'U', 'UX', 'UY', 'UT']);
+  } catch {
+    return () => Number.NaN;
+  }
   return (x, tau, u = 0) => {
-    const value = fn({
+    const value = fn?.({
       ...params,
       x,
       t: vars === 'xt' ? tau : 0,
       y: vars === 'xy' ? tau : 0,
       u,
       U: u,
+      UX: 0,
+      UY: 0,
+      UT: 0,
     });
     return Number.isFinite(value) ? value : 0;
   };
@@ -449,7 +461,7 @@ function traceValue(x: number, tau: number, data: Cauchy, aFn: Scalar, bFn: Scal
     y0: [x],
     rtol: 1e-6,
     atol: 1e-8,
-    maxSteps: 800,
+    maxSteps: 160,
     params: {},
     f: (s, y) => {
       const xx = y[0] ?? 0;
@@ -467,7 +479,8 @@ function traceValue(x: number, tau: number, data: Cauchy, aFn: Scalar, bFn: Scal
     y0: [foot, carried],
     rtol: 1e-6,
     atol: 1e-8,
-    maxSteps: 800,
+    maxSteps: 160,
+    blowUpRadius: 1e4,
     params: {},
     f: (s, y) => {
       const xx = y[0] ?? 0;
@@ -478,7 +491,8 @@ function traceValue(x: number, tau: number, data: Cauchy, aFn: Scalar, bFn: Scal
     },
   });
   const value = forward.y[forward.y.length - 1]?.[1] ?? carried;
-  return Number.isFinite(value) ? value : 0;
+  if (!Number.isFinite(value) || Math.abs(value) > 1e4) return Number.NaN;
+  return value;
 }
 
 function numericCurves(data: Cauchy, domain: Window, aFn: Scalar, bFn: Scalar, cFn: Scalar, dFn: Scalar): CharCurve[] {
@@ -489,7 +503,8 @@ function numericCurves(data: Cauchy, domain: Window, aFn: Scalar, bFn: Scalar, c
       y0: [x0, data.g(x0)],
       rtol: 1e-4,
       atol: 1e-6,
-      maxSteps: 400,
+      maxSteps: 120,
+      blowUpRadius: 1e4,
       sampleDistance: 0.25,
       params: {},
       viewport: { xMin: domain.x[0] - 4, xMax: domain.x[1] + 4, yMin: -1e6, yMax: 1e6 },
@@ -603,10 +618,10 @@ function dataCurve(data: Cauchy, domain: Window): Array<{ x: number; t: number; 
   return linspace(domain.x[0], domain.x[1], 24).map((x) => ({ x, t: data.t0, u: data.g(x) }));
 }
 
-function baseObjects(invariant: string): PdeObject[] {
+function baseObjects(invariant: string, dataLatex = 'u\\ \\text{on the initial line}'): PdeObject[] {
   return [
     { id: 'characteristics', label: 'Characteristics', formulaLatex: invariant, group: 'characteristic', defaultOn: true },
-    { id: 'data', label: 'Data', formulaLatex: '\\Gamma', group: 'boundary', defaultOn: true },
+    { id: 'data', label: 'Initial line', formulaLatex: dataLatex, group: 'boundary', defaultOn: true },
   ];
 }
 

@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import { Katex } from '../../ui/Katex';
 import { groupColor } from '../render/colors';
-import { usePdeStore } from '../store';
+import { activeFrame, usePdeStore } from '../store';
 
 export function ObjectTree() {
   const solution = usePdeStore((state) => state.solution);
@@ -19,6 +20,7 @@ export function ObjectTree() {
 
   return (
     <div className="viz-list">
+      <TimeControl />
       {solution.objects.map((object) => {
         const shown = !hidden.includes(object.id);
         const color = groupColor(object.group, theme);
@@ -54,7 +56,7 @@ export function ObjectTree() {
           </div>
         );
       })}
-      {modeCount > 0 && (
+      {modeCount > 1 && (
         <label className="parameter">
           <Katex tex="N" />
           <input
@@ -76,6 +78,55 @@ export function ObjectTree() {
           />
         </label>
       )}
+    </div>
+  );
+}
+
+function TimeControl() {
+  const solution = usePdeStore((state) => state.solution);
+  const frameId = usePdeStore((state) => state.frame);
+  const t0 = usePdeStore((state) => state.t0);
+  const setT0 = usePdeStore((state) => state.setT0);
+  const frame = activeFrame(solution, frameId);
+  const [playing, setPlaying] = useState(false);
+  const mode = solution?.family === 'heat' ? solution.modes[0] : undefined;
+
+  useEffect(() => {
+    if (!playing || !frame) return;
+    let handle = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      const span = frame.tMax - frame.tMin || 1;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const current = usePdeStore.getState().t0;
+      let next = current + span * dt * 0.28;
+      if (next > frame.tMax) next = frame.tMin;
+      setT0(next);
+      handle = requestAnimationFrame(step);
+    };
+    handle = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(handle);
+  }, [playing, frame, setT0]);
+
+  if (!frame || !(frame.tMax > frame.tMin + 1e-9)) return null;
+  const factor = mode && Number.isFinite(mode.lambda) ? Math.exp(-mode.lambda * Math.max(0, t0)) : null;
+  return (
+    <div className="parameter">
+      <button type="button" className={playing ? 'real-button on' : 'real-button'} onClick={() => setPlaying((value) => !value)}>
+        {playing ? 'Pause' : 'Play'}
+      </button>
+      <input
+        aria-label="Time"
+        type="range"
+        min={frame.tMin}
+        max={frame.tMax}
+        step={(frame.tMax - frame.tMin) / 200}
+        value={Math.min(frame.tMax, Math.max(frame.tMin, t0))}
+        onChange={(event) => setT0(Number(event.target.value))}
+      />
+      <span>{`t = ${Math.round(t0 * 1000) / 1000}`}</span>
+      {factor !== null && Number.isFinite(factor) ? <span>{`slowest factor ${Math.round(factor * 1000) / 1000}`}</span> : null}
     </div>
   );
 }
