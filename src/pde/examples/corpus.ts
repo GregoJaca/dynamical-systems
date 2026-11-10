@@ -88,7 +88,7 @@ export const PDE_EXAMPLES: PdeExample[] = [
   },
   {
     id: 'heat-reaction-source',
-    title: 'Reaction and a sine source',
+    title: 'Reaction, a Gaussian, and a linear source',
     group: 'Heat and diffusion',
     source: 'Evans, chapter 2, problem 12',
     blurb: 'The Gaussian piece is the heat kernel times e^{-c t} from the reaction, and the harmonic source x adds the rise (x/c)(1 - e^{-c t}).',
