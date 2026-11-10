@@ -231,6 +231,9 @@ function About() {
       <h1>About</h1>
       <p>The goal of this site is to aid in the understanding of dynamical systems. I highly recommend first solving problems by hand and sketching by hand, and only later to use visualization tools.</p>
       <p>
+        PDE lab is a separate page for the heat equation and characteristics. <a href="./pde/">PDE lab</a>
+      </p>
+      <p>
         For any issues / questions / ideas you can email me at:{' '}
         <a href="mailto:gregorio.jaca@gmail.com">gregorio.jaca@gmail.com</a>
       </p>
