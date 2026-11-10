@@ -374,10 +374,12 @@ function collectParameters(
   for (const expr of [zero, ...extra, ...conditions]) {
     try {
       const prepared = expr.includes('u(') || expr.includes('u_') ? expr : expr;
-      parse(toMath(shieldDerivatives(prepared), FIELD)).traverse((node: MathNode) => {
+      parse(toMath(shieldDerivatives(prepared), FIELD)).traverse((node: MathNode, _path: string, parent: MathNode) => {
         if (node.type !== 'SymbolNode') return;
+        const owner = parent as MathNode & { fn?: MathNode };
+        if (parent?.type === 'FunctionNode' && owner.fn === node) return;
         const name = (node as MathNode & { name: string }).name;
-        if (!RESERVED.has(name)) found.add(name);
+        if (!RESERVED.has(name) && !isBuiltInFunction(name)) found.add(name);
       });
     } catch {
       for (const word of expr.matchAll(/\b[A-Za-z][A-Za-z0-9]*\b/g)) {

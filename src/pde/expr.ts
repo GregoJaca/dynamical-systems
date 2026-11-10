@@ -5,7 +5,7 @@
 
 import { compile, erf, parse, type MathNode } from 'mathjs';
 import { paintSymbolLatex } from '../input/parser';
-import { prepareMath } from '../input/expression';
+import { isBuiltInFunction, prepareMath } from '../input/expression';
 
 const KNOWN_BASE = ['x', 'y', 't', 'u', 'r', 'pi', 'U', 'UT', 'UX', 'UY', 'UXX', 'UYY', 'UXY', 'UTT'];
 
@@ -46,7 +46,13 @@ export function compileMath(raw: string, known: readonly string[] = []): (scope:
     const message = error instanceof Error ? error.message : 'could not compile';
     throw new Error(`Could not read "${raw}": ${message}`);
   }
-  return (scope) => asNumber(fn.evaluate({ ...extras, ...scope }));
+  return (scope) => {
+    const values: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(scope)) {
+      if (!isBuiltInFunction(name)) values[name] = value;
+    }
+    return asNumber(fn.evaluate({ ...values, ...extras }));
+  };
 }
 
 export function evalMath(raw: string, scope: Record<string, number>, known: readonly string[] = []): number {
