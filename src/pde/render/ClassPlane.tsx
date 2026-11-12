@@ -91,21 +91,72 @@ function draw(
   });
   ctx.restore();
   ctx.globalAlpha = 1;
+  void delta;
+  paintLegend(ctx, families, colors, type, theme, palette.text, MARGIN.left, MARGIN.top, plotW);
+  ctx.strokeStyle = palette.axis;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
+  ctx.fillStyle = palette.muted;
+  ctx.font = '12px "Source Sans 3", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('x', width - MARGIN.right - 8, height - 8);
+  ctx.fillText('y', 8, MARGIN.top + 42);
+}
+
+/** One row above the lines: the type, then each family in its own color, dark enough to read. */
+function paintLegend(
+  ctx: CanvasRenderingContext2D,
+  families: Array<{ id: string; formulaLatex: string }>,
+  colors: string[],
+  type: string,
+  theme: 'light' | 'dark',
+  ink: string,
+  left: number,
+  top: number,
+  plotW: number,
+) {
+  const labelInk = ['#243e6a', '#8a6a00'];
   ctx.font = '13px "Source Sans 3", sans-serif';
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
+  const y = top + 14;
+  ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
+  ctx.fillRect(left, top, plotW, 28);
+  ctx.strokeStyle = theme === 'dark' ? '#2a2a2a' : '#e7e5e4';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, top + 28);
+  ctx.lineTo(left + plotW, top + 28);
+  ctx.stroke();
+  let x = left + 8;
+  ctx.fillStyle = ink;
+  ctx.fillText(type, x, y);
+  x += ctx.measureText(type).width + 16;
   families.forEach((family, index) => {
-    const color = colors[index % colors.length] ?? '#3b528b';
-    const caption = family.formulaLatex.replace(/\\mathrm\{const\}/g, 'const').replace(/\\[a-zA-Z]+/g, '').replace(/[{}]/g, '');
-    ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
-    const top = MARGIN.top + 6 + index * 18;
-    ctx.fillRect(MARGIN.left + 6, top - 1, ctx.measureText(caption).width + 8, 16);
-    ctx.fillStyle = color;
-    ctx.fillText(caption, MARGIN.left + 10, top);
+    const caption = plainFormula(family.formulaLatex);
+    const swatch = colors[index % colors.length] ?? '#3b528b';
+    const text = labelInk[index % labelInk.length] ?? ink;
+    ctx.strokeStyle = swatch;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 16, y);
+    ctx.stroke();
+    x += 22;
+    ctx.fillStyle = text;
+    ctx.fillText(caption, x, y);
+    x += ctx.measureText(caption).width + 18;
   });
-  ctx.fillStyle = palette.text;
-  ctx.fillText(type, MARGIN.left, 12);
-  void delta;
-  ctx.fillText('x', width - MARGIN.right - 8, height - 8);
-  ctx.fillText('y', 8, MARGIN.top + 4);
+}
+
+function plainFormula(latex: string): string {
+  return latex
+    .replace(/\\mathrm\{const\}/g, 'const')
+    .replace(/\\[a-zA-Z]+/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/-?\d+\.\d{4,}/g, (number) => String(Number(Number(number).toFixed(3))))
+    .replace(/-(?=\d)/g, ' − ')
+    .replace(/=/g, ' = ');
 }

@@ -166,7 +166,7 @@ function valueAt(x: number, tau: number, data: Cauchy, speed: Scalar, b: Scalar,
 }
 
 function trajectory(x0: number, data: Cauchy, t1: number, speed: Scalar, b: Scalar, c: Scalar, d: Scalar): Array<{ x: number; t: number; u: number }> {
-  return march(x0, data.g(x0), data.t0, t1, speed, b, c, d, 16);
+  return march(x0, data.g(x0), data.t0, t1, speed, b, c, d, 48);
 }
 
 /** Midpoint step of dx/dτ = speed and du/dτ = (d − c u) / b. One pass, no nested integrals. */
