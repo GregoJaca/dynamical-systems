@@ -36,11 +36,6 @@ export function Modes() {
       ctx.clearRect(0, 0, rect.width, rect.height);
       ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
       ctx.fillRect(0, 0, rect.width, rect.height);
-      ctx.fillStyle = palette.muted;
-      ctx.font = '12px "Source Sans 3", sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText('eigenfunctions', 6, 4);
       const cell = rect.width / count;
       heat.modes.forEach((mode, index) => {
         const id = modeId(heat, mode, index);
@@ -75,7 +70,7 @@ export function Modes() {
         samples.forEach((value, step) => {
           if (!Number.isFinite(value)) return;
           const px = left + 8 + ((cell - 16) * step) / (steps - 1);
-          const py = 32 + ((max - value) / (max - min)) * (rect.height - 48);
+          const py = 18 + ((max - value) / (max - min)) * (rect.height - 32);
           if (step === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         });
@@ -88,7 +83,7 @@ export function Modes() {
         ctx.font = '12px "Source Sans 3", sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText(mode.m != null ? `${mode.n},${mode.m}` : `φ${mode.n}`, left + 6, 18);
+        ctx.fillText(mode.m != null ? `${mode.n},${mode.m}` : `φ${mode.n}`, left + 6, 4);
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
         ctx.fillText('x', left + cell - 6, rect.height - 4);
@@ -104,6 +99,8 @@ export function Modes() {
   if (!heat || count === 0) return null;
 
   return (
+    <>
+    <p className="object-text">These shapes, each with its own decay, add up to u.</p>
     <div className="stage pde-modes">
       <canvas
         ref={canvasRef}
@@ -118,5 +115,6 @@ export function Modes() {
         }}
       />
     </div>
+    </>
   );
 }

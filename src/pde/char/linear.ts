@@ -524,7 +524,7 @@ function numericCurves(data: Cauchy, domain: Window, aFn: Scalar, bFn: Scalar, c
     return {
       id: `char-${index}`,
       invariantLatex: `x(${texNum(data.t0)})=${texNum(x0)}`,
-      carriedLatex: 'du/d\\tau=(d-cu)/b',
+      carriedLatex: `x(${texNum(data.t0)})=${texNum(x0)}`,
       points: traced.t.map((tau, point) => ({
         x: traced.y[point]?.[0] ?? x0,
         t: tau,
@@ -539,7 +539,7 @@ function straightCurves(data: Cauchy, speed: number, b: number, c: number, d: nu
   return linspace(domain.x[0], domain.x[1], count).map((x0, index) => ({
     id: `char-${index}`,
     invariantLatex: `x-${texNum(speed)}\\tau=${texNum(x0 - speed * data.t0)}`,
-    carriedLatex: 'u\\ \\text{from the data}',
+    carriedLatex: `x(${texNum(data.t0)})=${texNum(x0)}`,
     points: times.map((tau) => {
       const x = x0 + speed * (tau - data.t0);
       return { x, t: tau, u: evolve(data.g(x0), tau - data.t0, b, c, d) };
@@ -552,7 +552,7 @@ function dilationCurves(data: Cauchy, k: number, rate: number, source: number, d
   return linspace(domain.x[0], domain.x[1], 12).map((x0, index) => ({
     id: `char-${index}`,
     invariantLatex: `x e^{-${texNum(k)}\\tau}`,
-    carriedLatex: 'u',
+    carriedLatex: `x(${texNum(data.t0)})=${texNum(x0)}`,
     points: times.map((tau) => ({
       x: x0 * Math.exp(k * (tau - data.t0)),
       t: tau,
@@ -567,7 +567,7 @@ function eulerCurves(data: Cauchy, y0: number, power: number, domain: Window): C
   return feet.map((x0, index) => ({
     id: `char-${index}`,
     invariantLatex: `${'y'}/x=${texNum(y0 / x0)}`,
-    carriedLatex: `u=x^{-${texNum(power)}} F(y/x)`,
+    carriedLatex: `x(${texNum(y0)})=${texNum(x0)}`,
     points: ys.map((y) => {
       const x = (x0 * y) / y0;
       const ratio = x0 / x;

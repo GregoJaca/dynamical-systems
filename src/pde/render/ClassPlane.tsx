@@ -44,7 +44,7 @@ function draw(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  families: Array<{ id: string; slope: number | null; label: string }>,
+  families: Array<{ id: string; slope: number | null; label: string; formulaLatex: string }>,
   type: string,
   delta: number,
   theme: 'light' | 'dark',
@@ -91,8 +91,19 @@ function draw(
   });
   ctx.restore();
   ctx.globalAlpha = 1;
-  ctx.fillStyle = palette.text;
   ctx.font = '13px "Source Sans 3", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  families.forEach((family, index) => {
+    const color = colors[index % colors.length] ?? '#3b528b';
+    const caption = family.formulaLatex.replace(/\\mathrm\{const\}/g, 'const').replace(/\\[a-zA-Z]+/g, '').replace(/[{}]/g, '');
+    ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
+    const top = MARGIN.top + 6 + index * 18;
+    ctx.fillRect(MARGIN.left + 6, top - 1, ctx.measureText(caption).width + 8, 16);
+    ctx.fillStyle = color;
+    ctx.fillText(caption, MARGIN.left + 10, top);
+  });
+  ctx.fillStyle = palette.text;
   ctx.fillText(type, MARGIN.left, 12);
   void delta;
   ctx.fillText('x', width - MARGIN.right - 8, height - 8);

@@ -221,8 +221,9 @@ function drawPlane(
     ctx.globalAlpha = 1;
     recorded.push({ id: region.id, tex: region.latex, points: region.polygon.map(([x, t]) => [xOf(x), tOf(t)]), region: true });
   }
+  const familyIds = solution.objects.filter((object) => object.group === 'characteristic').map((object) => object.id);
   for (const curve of graphics.curves) {
-    const mark = emphasis(curve.id, selectedId, hoverId, hidden);
+    const mark = curveMark(curve.kind === 'curve' ? [curve.id, ...familyIds] : [curve.id], selectedId, hoverId, hidden);
     if (!mark.draw || curve.points.length < 2) continue;
     const pixels: Array<[number, number]> = [];
     ctx.globalAlpha = mark.alpha;
@@ -292,6 +293,19 @@ function drawPlane(
     paintColorbar(ctx, field.min, field.max, MARGIN.left + plotW + 10, MARGIN.top, 8, plotH, palette.muted, fieldMark.alpha);
   }
   return recorded;
+}
+
+function curveMark(
+  ids: string[],
+  selectedId: string | null,
+  hoverId: string | null,
+  hidden: readonly string[],
+): { draw: boolean; alpha: number; scale: number } {
+  if (ids.some((id) => hidden.includes(id))) return { draw: false, alpha: 0, scale: 1 };
+  const hot = ids.some((id) => id === hoverId);
+  const picked = ids.some((id) => id === selectedId);
+  if (hoverId && !hot) return { draw: true, alpha: 0.18, scale: picked ? 1.2 : 1 };
+  return { draw: true, alpha: 1, scale: picked || hot ? 1.8 : 1 };
 }
 
 function paintCharField(

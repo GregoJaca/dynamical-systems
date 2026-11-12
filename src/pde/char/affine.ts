@@ -65,7 +65,7 @@ function fitAffine(
   const curves = feet(domain, data).map((x0, index) => ({
     id: `char-${index}`,
     invariantLatex: `x(${prettyTex(data.t0)})=${prettyTex(x0)}`,
-    carriedLatex: `u\\ \\text{from}\\ g(${texNum(x0)})`,
+    carriedLatex: `x(${prettyTex(data.t0)})=${prettyTex(x0)}`,
     points: trajectory(x0, data, domain.t[1], speedOf, b, c, d),
   }));
   const speedLatex = characteristicOde(problem, { pi: Math.PI, e: Math.E, ...parameterValues(problem) }, tauName);
@@ -102,7 +102,7 @@ function fitProduct(
   const curves: CharCurve[] = feet(domain, data).map((x0, index) => ({
     id: `char-${index}`,
     invariantLatex: `x(${prettyTex(data.t0)})=${prettyTex(x0)}`,
-    carriedLatex: `u\\ \\text{from}\\ g(${texNum(x0)})`,
+    carriedLatex: `x(${prettyTex(data.t0)})=${prettyTex(x0)}`,
     points: trajectory(x0, data, domain.t[1], speedOf, b, c, d),
   }));
   const speedLatex = characteristicOde(problem, { pi: Math.PI, e: Math.E, ...parameterValues(problem) }, tauName);
