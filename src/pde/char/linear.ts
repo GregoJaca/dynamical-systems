@@ -7,12 +7,24 @@ import { integrateRK45 } from '../../numeric/rk45';
 import { compileMath, exprToLatex, mentions } from '../expr';
 import type { CharCurve, CharProblem, PdeObject } from '../types';
 import { solveAffine } from './affine';
+import { applyFace, cauchyWindow, prettyTex } from './formula';
 import type { BuiltChar } from './solveChar';
 import { constantOf, parameterValues } from './solveChar';
 
 type Scalar = (x: number, tau: number, u?: number) => number;
 
 export function solveLinear(problem: CharProblem): BuiltChar {
+  const params = parameterValues(problem);
+  const built = solveLinearCore(problem);
+  if (problem.data.kind !== 'cauchy') return built;
+  try {
+    return applyFace(problem, built, params);
+  } catch {
+    return built;
+  }
+}
+
+function solveLinearCore(problem: CharProblem): BuiltChar {
   const params = parameterValues(problem);
   const tauName = problem.vars === 'xy' ? 'y' : 't';
   if (problem.data.kind === 'strip') return solveStrip(problem, params, tauName);
@@ -58,7 +70,7 @@ function solveConstant(
   tauName: string,
 ): BuiltChar {
   const data = cauchy(problem, params);
-  const domain = windowFor(data.g, data.t0, false);
+  const domain = windowFor(problem, data.gExpr, data.t0);
   if (Math.abs(b) < 1e-12) return characteristicData(problem, data, a, c, d, domain, tauName);
 
   const speed = a / b;
@@ -72,7 +84,6 @@ function solveConstant(
     `The coefficients are constant, with speed \\(dx/d${tauName}=a/b=${texNum(speed)}\\).`,
     `The invariant is \\(${invariant}\\). Along a characteristic, \\(du/d${tauName}=(d-cu)/b\\).`,
     `The data \\(u(x,${texNum(data.t0)})=${tex(data.gExpr)}\\) fix the profile: \\(${formula}\\).`,
-    verificationLine(evaluate, data.t0, tauName),
   ].join(' ');
   return {
     exact: true,
@@ -143,7 +154,7 @@ function solveDilation(
   tauName: string,
 ): BuiltChar {
   const data = cauchy(problem, params);
-  const domain = windowFor(data.g, data.t0, false);
+  const domain = windowFor(problem, data.gExpr, data.t0);
   const foot = (x: number, tau: number) => x * Math.exp(-k * (tau - data.t0));
   const evaluate = (x: number, tau: number) => {
     const dt = tau - data.t0;
@@ -153,10 +164,8 @@ function solveDilation(
   const curves = dilationCurves(data, k, rate, source, domain);
   const worked = [
     problem.equationLatex,
-    `The characteristic ODE is \\(dx/d${tauName}=${texNum(k)} x\\), so \\(x(${tauName})=x_0 e^{${texNum(k)}(${tauName}-${texNum(data.t0)})}\\) and the foot is \\(x_0=x e^{-${texNum(k)}(${tauName}-${texNum(data.t0)})}\\).`,
-    `Transport gives \\(du/d${tauName}+${texNum(rate)} u=${texNum(source)}\\).`,
+    `The characteristic ODE is \\(dx/d${tauName}=${texNum(k)} x\\).`,
     `With \\(u(x,${texNum(data.t0)})=${tex(data.gExpr)}\\), \\(${formula}\\).`,
-    verificationLine(evaluate, data.t0, tauName),
   ].join(' ');
   return {
     exact: true,
@@ -166,7 +175,7 @@ function solveDilation(
     curves,
     dataCurve: dataCurve(data, domain),
     objects: baseObjects(`x e^{-${texNum(k)} ${tauName}}`),
-    notes: [{ id: 'dilation', title: 'Foot point', latex: `The foot on \\(${tauName}=${texNum(data.t0)}\\) is \\(x e^{-${texNum(k)}(${tauName}-${texNum(data.t0)})}\\).` }],
+    notes: [{ id: 'dilation', title: 'Characteristic ODE', latex: `\\frac{dx}{d${tauName}}=${texNum(k)} x` }],
     workedLatex: worked,
     features: [],
     warnings: [],
@@ -180,7 +189,7 @@ function solveDilation(
 function solveEuler(problem: CharProblem, params: Record<string, number>, alpha: number, c: number, tauName: string): BuiltChar {
   const data = cauchy(problem, params);
   const y0 = data.t0 === 0 ? 1 : data.t0;
-  const domain: Window = { x: [-4, 4], t: [0.5, Math.max(5, y0 + 1)] };
+  const domain = windowFor(problem, data.gExpr, y0);
   const power = c / alpha;
   const evaluate = (x: number, y: number): number => {
     if (!Number.isFinite(y) || Math.abs(y) < 1e-10) return 0;
@@ -198,7 +207,6 @@ function solveEuler(problem: CharProblem, params: Record<string, number>, alpha:
     `The rays of \\(x u_x+${tauName} u_{${tauName}}\\) are the lines \\(${tauName}/x=\\text{const}\\).`,
     `Writing \\(u=x^{-c/\\alpha} F(${tauName}/x)\\) with \\(\\alpha=${texNum(alpha)}\\) and \\(c=${texNum(c)}\\) separates the ODE \\(du/ds= -c u\\) from \\(dx/ds=\\alpha x\\).`,
     `The data \\(u(x,${texNum(y0)})=${tex(data.gExpr)}\\) give \\(${formula}\\).`,
-    `Check at \\((2,4)\\): the formula returns \\(${texNum(evaluate(2, 4))}\\). Substituting \\(u=x^{2}/${tauName}\\) when \\(g(x)=x^{2}\\) and \\(${tauName}_0=1\\) recovers \\(x u_x+${tauName} u_{${tauName}}-u=0\\).`,
   ].join(' ');
   return {
     exact: true,
@@ -300,10 +308,9 @@ function solveStrip(problem: CharProblem, params: Record<string, number>, tauNam
     notes: [{ id: 'regions', title: 'Two regions', latex: `The characteristic \\(x=${texNum(speed)} ${tauName}\\) separates data from \\(${tauName}=0\\) and data from \\(x=0\\).` }],
     workedLatex: [
       problem.equationLatex,
-      `Speed \\(a/b=${texNum(speed)}\\). For \\(x>${texNum(speed)} ${tauName}\\) the foot lies on the initial line; for \\(x<${texNum(speed)} ${tauName}\\) it lies on the left boundary.`,
+      `Speed \\(a/b=${texNum(speed)}\\). For \\(x>${texNum(speed)} ${tauName}\\) the trace meets the initial line; for \\(x<${texNum(speed)} ${tauName}\\) it meets the left boundary.`,
       speed < 0 ? 'Because the speed is negative, characteristics leave through x=0 and the boundary condition overdetermines the problem.' : `Separating line: \\(x=${texNum(speed)} ${tauName}\\).`,
-      `Corner check: g(0)=${texNum(gAt(0))}, boundary at 0 is ${texNum(bAt(0))}.`,
-      verificationLine(evaluate, 0.4, tauName),
+      `Corner values: g(0)=${texNum(gAt(0))}, and the boundary at 0 is ${texNum(bAt(0))}.`,
     ].join(' '),
     features: ['boundary-regions'],
     warnings,
@@ -320,7 +327,7 @@ function solveStrip(problem: CharProblem, params: Record<string, number>, tauNam
 
 function solveNumeric(problem: CharProblem, params: Record<string, number>, tauName: string): BuiltChar {
   const data = problem.data.kind === 'cauchy' ? cauchy(problem, params) : { g: () => 0, gExpr: '0', t0: 0 };
-  const domain = windowFor(data.g, data.t0, false);
+  const domain = windowFor(problem, data.gExpr, data.t0);
   const aFn = coefficientFunction(problem.aExpr, params, problem.vars);
   const bFn = coefficientFunction(problem.bExpr, params, problem.vars);
   const cFn = coefficientFunction(problem.cExpr, params, problem.vars);
@@ -340,10 +347,8 @@ function solveNumeric(problem: CharProblem, params: Record<string, number>, tauN
     notes: [{ id: 'numeric', title: 'Characteristic ODEs', latex: `${ode}.\\ ${warning}` }],
     workedLatex: [
       problem.equationLatex,
-      `The characteristic system is \\(dx/ds=a\\), \\(d${tauName}/ds=b\\), \\(du/ds=d-cu\\).`,
-      `The foot on \\(${tauName}=${texNum(data.t0)}\\) is found by integrating \\(dx/d${tauName}=a/b\\) with RK45, then \\(u\\) is carried back with \\(du/d${tauName}=(d-cu)/b\\).`,
+      `The characteristic ODE is \\(dx/d${tauName}=a/b\\), and \\(du/d${tauName}=(d-cu)/b\\).`,
       `Data: \\(u(x,${texNum(data.t0)})=${tex(data.gExpr)}\\).`,
-      verificationLine(evaluate, data.t0, tauName),
     ].join(' '),
     features: [],
     warnings: [warning],
@@ -547,7 +552,7 @@ function dilationCurves(data: Cauchy, k: number, rate: number, source: number, d
   return linspace(domain.x[0], domain.x[1], 12).map((x0, index) => ({
     id: `char-${index}`,
     invariantLatex: `x e^{-${texNum(k)}\\tau}`,
-    carriedLatex: 'u\\ \\text{from the foot}',
+    carriedLatex: 'u',
     points: times.map((tau) => ({
       x: x0 * Math.exp(k * (tau - data.t0)),
       t: tau,
@@ -625,16 +630,8 @@ function baseObjects(invariant: string, dataLatex = 'u\\ \\text{on the initial l
   ];
 }
 
-function windowFor(g: (x: number) => number, t0: number, twoValuedHint: boolean): Window {
-  const xs = linspace(-8, 8, 33);
-  const values = xs.map((x) => g(x));
-  const maxAbs = Math.max(...values.map((value) => Math.abs(value)), 0);
-  const unique = new Set(values.map((value) => Math.round(value * 20) / 20));
-  const twoValued = twoValuedHint || unique.size <= 3;
-  const x: [number, number] = maxAbs > 3 || twoValued ? [-3, 3] : [-2 * Math.PI, 2 * Math.PI];
-  const tLo = Math.min(0, t0);
-  const tHi = Math.max(t0 + 2, 3);
-  return { x, t: [tLo, tHi] };
+function windowFor(problem: CharProblem, gExpr: string, t0: number): Window {
+  return cauchyWindow(problem, t0, gExpr);
 }
 
 function closedFormLatex(speed: number, b: number, c: number, d: number, data: Cauchy, tauName: string): string {
@@ -668,12 +665,6 @@ function sourceTerm(rate: number, source: number, tauName: string, t0: number): 
   return `+${texNum(source / rate)}\\big(1-e^{-${texNum(rate)}(${tauName}-${texNum(t0)})}\\big)`;
 }
 
-function verificationLine(evaluate: (x: number, tau: number) => number, t0: number, tauName: string): string {
-  const probeX = 0.7;
-  const probeT = t0 + 0.3;
-  return `One check: \\(u(${texNum(probeX)},${texNum(probeT)})=${texNum(evaluate(probeX, probeT))}\\) in the \\((x,${tauName})\\) plane.`;
-}
-
 function linspace(start: number, end: number, count: number): number[] {
   if (count <= 1) return [start];
   return Array.from({ length: count }, (_, index) => start + ((end - start) * index) / (count - 1));
@@ -688,9 +679,7 @@ function tex(expr: string): string {
 }
 
 function texNum(value: number): string {
-  if (!Number.isFinite(value)) return '0';
-  const rounded = Math.round(value * 1e8) / 1e8;
-  return String(rounded);
+  return prettyTex(value);
 }
 
 function trim(value: number): string {

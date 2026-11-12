@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
-import type { FieldFrame } from '../types';
+import type { FieldFrame, HeatSolution } from '../types';
 import { emphasis, viridis } from './colors';
 import { midY, sampleFrame, sampleMode } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
@@ -182,6 +182,10 @@ export function Heatmap() {
   const partialN = usePdeStore((state) => state.partialN);
   const frame = solution?.family === 'heat' ? activeFrame(solution, frameId) : null;
   const spatial = solution?.family === 'heat' ? solution.spatial : 'x';
+  const colorScale = useMemo(() => {
+    if (!frame || solution?.family !== 'heat' || solution.spatial === 'x') return null;
+    return fixedScale(solution, frame, partialN, selectedId, hoverId);
+  }, [solution, frame, partialN, selectedId, hoverId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -199,13 +203,14 @@ export function Heatmap() {
         selectedId,
         hoverId,
         partialN,
+        colorScale,
       });
     };
     const observer = new ResizeObserver(paint);
     observer.observe(canvas);
     paint();
     return () => observer.disconnect();
-  }, [solution, frame, theme, x0, t0, hidden, selectedId, hoverId, partialN]);
+  }, [solution, frame, theme, x0, t0, hidden, selectedId, hoverId, partialN, colorScale]);
 
   if (!frame || solution?.family !== 'heat') return null;
 
@@ -295,18 +300,11 @@ function drawHeat(
     selectedId: string | null;
     hoverId: string | null;
     partialN: number;
+    colorScale: { min: number; max: number } | null;
   },
 ) {
-  const { solution, frame, theme, x0, t0, hidden, selectedId, hoverId, partialN } = props;
-  const pickedMode = solution.modes.find((mode) => mode.id === selectedId || mode.id === hoverId) ?? null;
-  const shownModes = solution.modes.slice(0, Math.max(1, Math.min(partialN, solution.modes.length)));
-  const sample = (x: number, t: number, y?: number) => {
-    if (pickedMode) return sampleMode(pickedMode, x, t, y);
-    if (solution.spatial !== 'x' && solution.modes.length > 0 && shownModes.length < solution.modes.length) {
-      return shownModes.reduce((sum, mode) => sum + sampleMode(mode, x, t, y), 0);
-    }
-    return sampleFrame(frame, x, t, y);
-  };
+  const { solution, frame, theme, x0, t0, hidden, selectedId, hoverId, partialN, colorScale } = props;
+  const sample = viewSample(solution, frame, partialN, selectedId, hoverId);
   const palette = PALETTE[theme];
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
@@ -379,72 +377,47 @@ function drawHeat(
     return;
   }
 
-  const radius = Math.max(Math.abs(frame.xMax), Math.abs(frame.xMin), 1e-6);
-  const xMin = solution.spatial === 'radial' ? -radius : frame.xMin;
-  const xMax = solution.spatial === 'radial' ? radius : frame.xMax;
-  const yMin = solution.spatial === 'radial' ? -radius : (frame.yMin ?? frame.xMin);
-  const yMax = solution.spatial === 'radial' ? radius : (frame.yMax ?? frame.xMax);
-  const nx = 96;
-  const ny = solution.spatial === 'radial' ? 96 : 72;
+  const layout = spatialLayout(solution, frame);
+  const { radius, xMin, xMax, yMin, yMax, nx, ny, xs, ys } = layout;
   const box =
     solution.spatial === 'radial'
       ? equalBox(width, height, xMin, xMax, yMin, yMax)
       : { left: MARGIN.left, top: MARGIN.top, width: plotW, height: plotH };
   const grid: number[][] = [];
-  const xs: number[] = [];
-  const ys: number[] = [];
-  let min = Infinity;
-  let max = -Infinity;
-  for (let i = 0; i < nx; i += 1) xs.push(xMin + ((xMax - xMin) * i) / (nx - 1));
-  for (let j = 0; j < ny; j += 1) ys.push(yMin + ((yMax - yMin) * j) / (ny - 1));
   const flat = new Float64Array(nx * ny);
-  let refMin = Infinity;
-  let refMax = -Infinity;
   for (let j = 0; j < ny; j += 1) {
     const row: number[] = [];
     for (let i = 0; i < nx; i += 1) {
       const x = xs[i]!;
       const yValue = ys[j]!;
       let value = Number.NaN;
-      let reference = Number.NaN;
       if (solution.spatial === 'radial') {
         const r = Math.hypot(x, yValue);
-        if (r <= radius) {
-          value = sample(r, t0);
-          reference = sample(r, frame.tMin);
-        }
+        if (r <= radius) value = sample(r, t0);
       } else {
         value = sample(x, t0, yValue);
-        reference = sample(x, frame.tMin, yValue);
       }
       row.push(value);
       flat[j * nx + i] = value;
-      if (Number.isFinite(value)) {
-        if (value < min) min = value;
-        if (value > max) max = value;
-      }
-      if (Number.isFinite(reference)) {
-        if (reference < refMin) refMin = reference;
-        if (reference > refMax) refMax = reference;
-      }
     }
     grid.push(row);
   }
-  const scaleMin = Number.isFinite(refMin) && refMax > refMin + 1e-8 ? refMin : min;
-  const scaleMax = Number.isFinite(refMax) && refMax > refMin + 1e-8 ? refMax : max;
+  const scaleMin = colorScale?.min ?? Number.NaN;
+  const scaleMax = colorScale?.max ?? Number.NaN;
+  const pickedMode = solution.modes.some((mode) => mode.id === selectedId || mode.id === hoverId);
   const alpha = pickedMode ? 1 : fieldMark.draw ? fieldMark.alpha : 0;
   paintField(ctx, flat, nx, ny, scaleMin, scaleMax, box, alpha);
-  if (Number.isFinite(min) && Number.isFinite(max) && max > min) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(box.left, box.top, box.width, box.height);
-    ctx.clip();
-    const xOf = (x: number) => box.left + ((x - xMin) / (xMax - xMin || 1)) * box.width;
-    const yOf = (yValue: number) => box.top + ((yMax - yValue) / (yMax - yMin || 1)) * box.height;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.left, box.top, box.width, box.height);
+  ctx.clip();
+  const xOf = (x: number) => box.left + ((x - xMin) / (xMax - xMin || 1)) * box.width;
+  const yOf = (yValue: number) => box.top + ((yMax - yValue) / (yMax - yMin || 1)) * box.height;
+  if (Number.isFinite(scaleMin) && Number.isFinite(scaleMax) && scaleMax > scaleMin) {
     ctx.strokeStyle = theme === 'dark' ? 'rgba(243,241,236,0.85)' : 'rgba(28,25,23,0.75)';
     ctx.lineWidth = 1.1;
     for (let level = 1; level <= 6; level += 1) {
-      const heightLevel = min + ((max - min) * level) / 7;
+      const heightLevel = scaleMin + ((scaleMax - scaleMin) * level) / 7;
       for (const [start, end] of marchSquares(xs, ys, grid, heightLevel)) {
         ctx.beginPath();
         ctx.moveTo(xOf(start[0]), yOf(start[1]));
@@ -452,31 +425,31 @@ function drawHeat(
         ctx.stroke();
       }
     }
-    ctx.strokeStyle = palette.text;
-    ctx.setLineDash([4, 3]);
-    ctx.lineWidth = 1.2;
-    if (solution.spatial === 'radial') {
-      ctx.beginPath();
-      ctx.arc(xOf(0), yOf(0), Math.abs(xOf(Math.min(radius, Math.max(0, x0))) - xOf(0)), 0, Math.PI * 2);
-      ctx.stroke();
-    } else {
-      const px = xOf(x0);
-      ctx.beginPath();
-      ctx.moveTo(px, box.top);
-      ctx.lineTo(px, box.top + box.height);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    const boundary = solution.objects.find((object) => object.group === 'boundary');
-    const boundaryMark = boundary ? emphasis(boundary.id, selectedId, hoverId, hidden) : null;
-    if (boundaryMark?.draw && solution.spatial === 'xy') {
-      ctx.setLineDash([]);
-      ctx.strokeStyle = theme === 'dark' ? '#f3f1ec' : '#1c1917';
-      ctx.lineWidth = 2.4 * boundaryMark.scale;
-      ctx.strokeRect(xOf(frame.xMin), yOf(frame.yMax ?? frame.xMax), xOf(frame.xMax) - xOf(frame.xMin), yOf(frame.yMin ?? frame.xMin) - yOf(frame.yMax ?? frame.xMax));
-    }
-    ctx.restore();
   }
+  ctx.strokeStyle = palette.text;
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 1.2;
+  if (solution.spatial === 'radial') {
+    ctx.beginPath();
+    ctx.arc(xOf(0), yOf(0), Math.abs(xOf(Math.min(radius, Math.max(0, x0))) - xOf(0)), 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    const px = xOf(x0);
+    ctx.beginPath();
+    ctx.moveTo(px, box.top);
+    ctx.lineTo(px, box.top + box.height);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  const boundary = solution.objects.find((object) => object.group === 'boundary');
+  const boundaryMark = boundary ? emphasis(boundary.id, selectedId, hoverId, hidden) : null;
+  if (boundaryMark?.draw && solution.spatial === 'xy') {
+    ctx.setLineDash([]);
+    ctx.strokeStyle = theme === 'dark' ? '#f3f1ec' : '#1c1917';
+    ctx.lineWidth = 2.4 * boundaryMark.scale;
+    ctx.strokeRect(xOf(frame.xMin), yOf(frame.yMax ?? frame.xMax), xOf(frame.xMax) - xOf(frame.xMin), yOf(frame.yMin ?? frame.xMin) - yOf(frame.yMax ?? frame.xMax));
+  }
+  ctx.restore();
   paintAxes(
     ctx,
     width,
@@ -489,6 +462,81 @@ function drawHeat(
     solution.spatial === 'radial' ? 'y' : (frame.yName ?? 'y'),
     theme,
   );
+}
+
+function viewSample(
+  solution: HeatSolution,
+  frame: FieldFrame,
+  partialN: number,
+  selectedId: string | null,
+  hoverId: string | null,
+) {
+  const pickedMode = solution.modes.find((mode) => mode.id === selectedId || mode.id === hoverId) ?? null;
+  const shownModes = solution.modes.slice(0, Math.max(1, Math.min(partialN, solution.modes.length)));
+  return (x: number, t: number, y?: number) => {
+    if (pickedMode) return sampleMode(pickedMode, x, t, y);
+    if (solution.spatial !== 'x' && solution.modes.length > 0 && shownModes.length < solution.modes.length) {
+      return shownModes.reduce((sum, mode) => sum + sampleMode(mode, x, t, y), 0);
+    }
+    return sampleFrame(frame, x, t, y);
+  };
+}
+
+function spatialLayout(solution: HeatSolution, frame: FieldFrame) {
+  const radius = Math.max(Math.abs(frame.xMax), Math.abs(frame.xMin), 1e-6);
+  const xMin = solution.spatial === 'radial' ? -radius : frame.xMin;
+  const xMax = solution.spatial === 'radial' ? radius : frame.xMax;
+  const yMin = solution.spatial === 'radial' ? -radius : (frame.yMin ?? frame.xMin);
+  const yMax = solution.spatial === 'radial' ? radius : (frame.yMax ?? frame.xMax);
+  const nx = 96;
+  const ny = solution.spatial === 'radial' ? 96 : 72;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < nx; i += 1) xs.push(xMin + ((xMax - xMin) * i) / (nx - 1));
+  for (let j = 0; j < ny; j += 1) ys.push(yMin + ((yMax - yMin) * j) / (ny - 1));
+  return { radius, xMin, xMax, yMin, yMax, nx, ny, xs, ys };
+}
+
+function fixedScale(
+  solution: HeatSolution,
+  frame: FieldFrame,
+  partialN: number,
+  selectedId: string | null,
+  hoverId: string | null,
+): { min: number; max: number } {
+  const layout = spatialLayout(solution, frame);
+  const sample = viewSample(solution, frame, partialN, selectedId, hoverId);
+  const measure = (t: number) => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let j = 0; j < layout.ny; j += 1) {
+      for (let i = 0; i < layout.nx; i += 1) {
+        const x = layout.xs[i]!;
+        const yValue = layout.ys[j]!;
+        let value = Number.NaN;
+        if (solution.spatial === 'radial') {
+          const r = Math.hypot(x, yValue);
+          if (r <= layout.radius) value = sample(r, t);
+        } else value = sample(x, t, yValue);
+        if (Number.isFinite(value)) {
+          if (value < min) min = value;
+          if (value > max) max = value;
+        }
+      }
+    }
+    return { min, max };
+  };
+  const scale = measure(frame.tMin);
+  const span = Number.isFinite(scale.min) && Number.isFinite(scale.max) ? scale.max - scale.min : 0;
+  if (span >= 1e-6) return scale;
+  const steps = 5;
+  for (let step = 0; step < steps; step += 1) {
+    const t = frame.tMin + ((frame.tMax - frame.tMin) * step) / (steps - 1);
+    const next = measure(t);
+    if (next.min < scale.min) scale.min = next.min;
+    if (next.max > scale.max) scale.max = next.max;
+  }
+  return scale;
 }
 
 function paintField(

@@ -233,6 +233,9 @@ export function Surface3D() {
 
   return (
     <>
+      <p className="object-text">
+        <Katex tex={`u(${frame.xName}, ${frame.tName})`} />
+      </p>
       <div className="stage pde-surface">
         <SurfaceBoundary>
           <Canvas className="pde-surface-canvas" camera={CAMERA} gl={GL} style={{ width: '100%', height: '100%' }}>

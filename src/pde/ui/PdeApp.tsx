@@ -72,12 +72,12 @@ function Picture() {
       </div>
       <div className="portrait-extras">
         {solution.family === 'heat' && active && solution.spatial === 'x' ? <Profile /> : null}
-        {solution.family === 'heat' && solution.modes.length > 0 ? <Modes /> : null}
-        {solution.family === 'classify' ? null : (
+        {solution.family === 'heat' && solution.modes.length > 0 && solution.modes.length <= 6 ? <Modes /> : null}
+        {solution.family === 'heat' ? (
           <Suspense fallback={<p className="status">Loading the surface…</p>}>
             <Surface3D />
           </Suspense>
-        )}
+        ) : null}
       </div>
     </div>
   );

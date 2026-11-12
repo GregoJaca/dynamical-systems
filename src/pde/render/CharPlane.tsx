@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
 import { Katex } from '../../ui/Katex';
 import type { CharSolution, FieldFrame } from '../types';
-import { emphasis, groupColor, viridisCss } from './colors';
-import { charGraphics, type CurveLayer } from './exportView';
+import { emphasis, groupColor, viridis } from './colors';
+import { charGraphics, sampleFrame, type CurveLayer } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
-const MARGIN = { left: 46, right: 14, top: 12, bottom: 32 };
+const MARGIN = { left: 46, right: 72, top: 12, bottom: 32 };
+const GRID_X = 140;
+const GRID_Y = 90;
 
 interface Tip {
   tex: string;
@@ -46,10 +48,11 @@ export function CharPlane() {
   const hits = useRef<Array<{ id: string; tex: string; points: Array<[number, number]>; region: boolean }>>([]);
   const char = solution?.family === 'characteristics' ? solution : null;
   const frame = activeFrame(solution, frameId);
+  const field = useMemo(() => (frame ? sampleCharField(frame) : null), [frame]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !char || !frame) return;
+    if (!canvas || !char || !frame || !field) return;
     const paint = () => {
       const rect = canvas.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -62,13 +65,13 @@ export function CharPlane() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      hits.current = drawPlane(ctx, rect.width, rect.height, char, frame, theme, x0, t0, hidden, selectedId, hoverId);
+      hits.current = drawPlane(ctx, rect.width, rect.height, char, frame, field, theme, x0, t0, hidden, selectedId, hoverId);
     };
     const observer = new ResizeObserver(paint);
     observer.observe(canvas);
     paint();
     return () => observer.disconnect();
-  }, [char, frame, theme, x0, t0, hidden, selectedId, hoverId]);
+  }, [char, frame, field, theme, x0, t0, hidden, selectedId, hoverId]);
 
   if (!char || !frame) return null;
 
@@ -123,12 +126,54 @@ export function CharPlane() {
   );
 }
 
+interface CharField {
+  values: Float64Array;
+  min: number;
+  max: number;
+}
+
+function sampleCharField(frame: FieldFrame): CharField {
+  const values = new Float64Array(GRID_X * GRID_Y);
+  let min = Infinity;
+  let max = -Infinity;
+  const spanX = frame.xMax - frame.xMin;
+  const spanT = frame.tMax - frame.tMin;
+  for (let j = 0; j < GRID_Y; j += 1) {
+    const tau = frame.tMin + (spanT * j) / (GRID_Y - 1);
+    for (let i = 0; i < GRID_X; i += 1) {
+      const x = frame.xMin + (spanX * i) / (GRID_X - 1);
+      const value = sampleFrame(frame, x, tau);
+      values[j * GRID_X + i] = value;
+      if (Number.isFinite(value)) {
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+    }
+  }
+  return { values, min, max };
+}
+
+function strokeWidth(kind: CurveLayer['kind']): number {
+  if (kind === 'data') return 4.2;
+  if (kind === 'curve') return 2.2;
+  if (kind === 'shock') return 3.4;
+  if (kind === 'envelope') return 2;
+  return 1.45;
+}
+
+function strokeColor(kind: CurveLayer['kind'], theme: 'light' | 'dark', ink: string): string {
+  if (kind === 'data') return groupColor('boundary', theme);
+  if (kind === 'curve') return ink;
+  return colorOf(kind, theme);
+}
+
 function drawPlane(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   solution: CharSolution,
   frame: FieldFrame,
+  field: CharField,
   theme: 'light' | 'dark',
   x0: number,
   t0: number,
@@ -147,10 +192,13 @@ function drawPlane(
   ctx.fillRect(0, 0, width, height);
   ctx.strokeStyle = palette.axis;
   ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
+  const fieldObject = solution.objects.find((object) => object.group === 'field');
+  const fieldMark = fieldObject ? emphasis(fieldObject.id, selectedId, hoverId, hidden) : { draw: true, alpha: 1, scale: 1 };
   ctx.save();
   ctx.beginPath();
   ctx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
   ctx.clip();
+  if (fieldMark.draw) paintCharField(ctx, field, { left: MARGIN.left, top: MARGIN.top, width: plotW, height: plotH }, fieldMark.alpha);
   const recorded: Array<{ id: string; tex: string; points: Array<[number, number]>; region: boolean }> = [];
   for (const region of graphics.regions) {
     const mark = emphasis(region.id, selectedId, hoverId, hidden);
@@ -169,34 +217,23 @@ function drawPlane(
     ctx.globalAlpha = 1;
     recorded.push({ id: region.id, tex: region.latex, points: region.polygon.map(([x, t]) => [xOf(x), tOf(t)]), region: true });
   }
-  const carried = graphics.curves.flatMap((curve) => curve.values ?? []).filter((value) => Number.isFinite(value));
-  const uMin = carried.length ? Math.min(...carried) : 0;
-  const uMax = carried.length ? Math.max(...carried) : 1;
   for (const curve of graphics.curves) {
     const mark = emphasis(curve.id, selectedId, hoverId, hidden);
     if (!mark.draw || curve.points.length < 2) continue;
     const pixels: Array<[number, number]> = [];
-    const base = curve.kind === 'data' || curve.kind === 'shock' ? 3.4 : curve.kind === 'envelope' ? 2 : 1.45;
     ctx.globalAlpha = mark.alpha;
-    ctx.lineWidth = base * mark.scale;
+    ctx.lineWidth = strokeWidth(curve.kind) * mark.scale;
+    ctx.strokeStyle = strokeColor(curve.kind, theme, palette.text);
     ctx.setLineDash(curve.kind === 'envelope' ? [7, 5] : []);
-    for (let index = 1; index < curve.points.length; index += 1) {
-      const start = curve.points[index - 1]!;
-      const end = curve.points[index]!;
-      const x1 = xOf(start[0]);
-      const y1 = tOf(start[1]);
-      const x2 = xOf(end[0]);
-      const y2 = tOf(end[1]);
-      if (index === 1) pixels.push([x1, y1]);
-      pixels.push([x2, y2]);
-      const value = curve.values?.[index] ?? curve.values?.[index - 1];
-      const shade = value === undefined || uMax <= uMin ? null : (value - uMin) / (uMax - uMin);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.strokeStyle = shade === null || curve.kind === 'data' ? colorOf(curve.kind, theme) : viridisCss(shade);
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    curve.points.forEach((point, index) => {
+      const px = xOf(point[0]);
+      const py = tOf(point[1]);
+      pixels.push([px, py]);
+      if (index === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     recorded.push({ id: curve.id, tex: curve.latex, points: pixels, region: false });
@@ -228,7 +265,76 @@ function drawPlane(
   ctx.fillStyle = palette.text;
   ctx.fillText(frame.xName, width - MARGIN.right - 16, height - 4);
   ctx.fillText(frame.tName, 8, MARGIN.top + 4);
+  if (fieldMark.draw && Number.isFinite(field.min) && Number.isFinite(field.max)) {
+    paintColorbar(ctx, field.min, field.max, MARGIN.left + plotW + 10, MARGIN.top, 8, plotH, palette.muted, fieldMark.alpha);
+  }
   return recorded;
+}
+
+function paintCharField(
+  ctx: CanvasRenderingContext2D,
+  field: CharField,
+  box: { left: number; top: number; width: number; height: number },
+  alpha: number,
+) {
+  if (alpha <= 0 || !Number.isFinite(field.min) || !Number.isFinite(field.max)) return;
+  const off = document.createElement('canvas');
+  off.width = GRID_X;
+  off.height = GRID_Y;
+  const imageCtx = off.getContext('2d');
+  if (!imageCtx) return;
+  const image = imageCtx.createImageData(GRID_X, GRID_Y);
+  const span = field.max - field.min || 1;
+  for (let row = 0; row < GRID_Y; row += 1) {
+    const source = GRID_Y - 1 - row;
+    for (let col = 0; col < GRID_X; col += 1) {
+      const value = field.values[source * GRID_X + col] ?? Number.NaN;
+      if (!Number.isFinite(value)) continue;
+      const pixel = (row * GRID_X + col) * 4;
+      const [red, green, blue] = viridis((value - field.min) / span);
+      image.data[pixel] = red;
+      image.data[pixel + 1] = green;
+      image.data[pixel + 2] = blue;
+      image.data[pixel + 3] = 255;
+    }
+  }
+  imageCtx.putImageData(image, 0, 0);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(off, box.left, box.top, box.width, box.height);
+  ctx.restore();
+}
+
+function paintColorbar(
+  ctx: CanvasRenderingContext2D,
+  min: number,
+  max: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+  alpha: number,
+) {
+  const steps = max - min < 1e-9 ? 1 : 48;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  for (let index = 0; index < steps; index += 1) {
+    const shade = steps === 1 ? 0 : 1 - index / (steps - 1);
+    const [red, green, blue] = viridis(shade);
+    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+    ctx.fillRect(x, y + (height * index) / steps, width, height / steps + 0.5);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = color;
+  ctx.font = '12px "Source Sans 3", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(tick(max), x + width + 4, y);
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(tick(min), x + width + 4, y + height);
+  ctx.restore();
 }
 
 function nearest(

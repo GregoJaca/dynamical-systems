@@ -71,7 +71,7 @@ function robinNeumann(k: number, left: number, length: number, count: number, h:
         const sign = flip ? -1 : 1;
         return sign * (-mu * Math.sin(mu * z) - h * Math.cos(mu * z));
       },
-      phiLatex: `\\cos(\\mu x)-(h/\\mu)\\sin(\\mu x),\\ \\mu\\approx ${trimNumber(mu)}`,
+      phiLatex: robinPhiLatex(flip, left, length),
       growing: false,
     });
   });
@@ -260,7 +260,7 @@ function dirichletRobin(
     const latex =
       robinEnd === 'right'
         ? `\\sin\\left(${waveLatex(mu, left)}\\right)`
-        : `\\sin\\left(${muLatex(mu)}(${formatPlace(left + length)}-x)\\right)`;
+        : `\\sin\\left(${reflectedAngle(mu, left, length)}\\right)`;
     if (robinEnd === 'right') {
       modes.push(makeMode(index + 1, mu, k * mu * mu, norm, 'sin', left, latex, false));
     } else {
@@ -439,33 +439,104 @@ function modeKey(mode: SpectralMode): string {
 }
 
 function sineLatex(n: number, left: number, length: number): string {
-  if (nearly(left, 0) && nearly(length, Math.PI)) return `\\sin\\left(${n === 1 ? 'x' : `${n} x`}\\right)`;
-  return `\\sin\\left(${n}\\pi ${shifted(left, length)}\\right)`;
+  return `\\sin(${trigAngle(n, left, length)})`;
 }
 
 function cosineLatex(n: number, left: number, length: number): string {
-  if (nearly(left, 0) && nearly(length, Math.PI)) return `\\cos\\left(${n === 1 ? 'x' : `${n} x`}\\right)`;
-  return `\\cos\\left(${n}\\pi ${shifted(left, length)}\\right)`;
+  return `\\cos(${trigAngle(n, left, length)})`;
+}
+
+function trigAngle(n: number, left: number, length: number): string {
+  if (nearly(left, 0) && nearly(length, Math.PI)) return n === 1 ? 'x' : `${n}x`;
+  const tail = shifted(left, length);
+  const freq = n === 1 ? '\\pi' : `${n}\\pi`;
+  if (tail === 'x') return `${freq} x`;
+  return `${freq} ${tail}`;
+}
+
+function robinPhiLatex(flip: boolean, left: number, length: number): string {
+  const spatial = robinSpatial(flip, left, length);
+  const arg = spatial === 'x' ? '\\mu_n x' : `\\mu_n ${spatial}`;
+  return `\\cos(${arg})-(h/\\mu_n)\\sin(${arg})`;
+}
+
+function robinSpatial(flip: boolean, left: number, length: number): string {
+  if (!flip) {
+    if (nearly(left, 0)) return 'x';
+    return `(x-${formatPlace(left)})`;
+  }
+  return `(${formatPlace(left + length)}-x)`;
+}
+
+function reflectedAngle(mu: number, left: number, length: number): string {
+  const factor = muLatex(mu).trim();
+  const right = formatPlace(left + length);
+  if (uglyMu(factor)) return `\\mu_n(${right}-x)`;
+  if (factor === '') return `(${right}-x)`;
+  return `${factor}(${right}-x)`;
 }
 
 function shifted(left: number, length: number): string {
   const place = formatPlace(left);
   const span = formatPlace(length);
+  if (place === '0' && span === '1') return 'x';
   if (place === '0') return `x/${span}`;
+  if (span === '1') return `(x-${place})`;
   return `(x-${place})/${span}`;
 }
 
 function waveLatex(mu: number, left: number): string {
-  const factor = muLatex(mu);
+  const factor = muLatex(mu).trim();
   const place = formatPlace(left);
-  if (place === '0') return `${factor} x`;
+  if (uglyMu(factor)) return place === '0' ? '\\mu_n x' : `\\mu_n(x-${place})`;
+  if (factor === '') return place === '0' ? 'x' : `(x-${place})`;
+  if (place === '0') return /^-?\d+$/.test(factor) ? `${factor}x` : `${factor} x`;
   return `${factor}(x-${place})`;
 }
 
 function muLatex(mu: number): string {
   if (nearly(mu, 1)) return '';
-  if (nearly(mu, Math.PI)) return '\\pi ';
+  const ratio = exactNumberLatex(mu / Math.PI);
+  if (ratio === '1') return '\\pi ';
+  if (ratio) return `${ratio}\\pi `;
+  const plain = exactNumberLatex(mu);
+  if (plain) return `${plain} `;
   return `${trimNumber(mu)} `;
+}
+
+function uglyMu(factor: string): boolean {
+  return /\d+\.\d/.test(factor);
+}
+
+export function exactNumberLatex(value: number): string | null {
+  if (!Number.isFinite(value)) return null;
+  if (Math.abs(value) < 1e-12) return '0';
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) <= 1e-8 * (1 + Math.abs(rounded))) return String(rounded);
+  for (let den = 2; den <= 12; den += 1) {
+    const num = Math.round(value * den);
+    if (Math.abs(num) > 80) continue;
+    if (Math.abs(value * den - num) <= 1e-7 * den) {
+      const divisor = gcd(Math.abs(num), den);
+      const n = num / divisor;
+      const d = den / divisor;
+      if (d === 1) return String(n);
+      if (n < 0) return `-\\frac{${Math.abs(n)}}{${d}}`;
+      return `\\frac{${n}}{${d}}`;
+    }
+  }
+  return null;
+}
+
+function gcd(a: number, b: number): number {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
 }
 
 export function trimNumber(value: number): string {
@@ -473,7 +544,7 @@ export function trimNumber(value: number): string {
   if (Math.abs(value) < 1e-12) return '0';
   if (nearly(value, Math.PI)) return '\\pi';
   const rounded = Math.round(value);
-  if (Math.abs(value - rounded) < 1e-10) return String(rounded);
+  if (Math.abs(value - rounded) <= 1e-7 * (1 + Math.abs(value))) return String(rounded);
   const text = value.toPrecision(8).replace(/\.?0+$/, '');
   return text;
 }

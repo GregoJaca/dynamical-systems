@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
+import type { FieldFrame, HeatSolution } from '../types';
 import { groupColor } from './colors';
 import { finiteExtent, profileSeries } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
@@ -27,6 +28,7 @@ export function Profile() {
   const setX0 = usePdeStore((state) => state.setX0);
   const frame = activeFrame(solution, frameId);
   const heat = solution?.family === 'heat' ? solution : null;
+  const yRange = useMemo(() => (heat && frame ? frozenProfileRange(heat, frame) : { min: -1, max: 1 }), [heat, frame]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -44,13 +46,12 @@ export function Profile() {
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const series = profileSeries(heat, frame, t0, partialN, hidden, selectedId);
-      const range = finiteExtent([...series.u, ...(series.partial ?? []), ...(series.selected ?? [])]);
       const plotW = rect.width - MARGIN.left - MARGIN.right;
       const plotH = rect.height - MARGIN.top - MARGIN.bottom;
       const spanX = frame.xMax - frame.xMin || 1;
-      const spanU = range.max - range.min || 1;
+      const spanU = yRange.max - yRange.min || 1;
       const xOf = (x: number) => MARGIN.left + ((x - frame.xMin) / spanX) * plotW;
-      const yOf = (u: number) => MARGIN.top + ((range.max - u) / spanU) * plotH;
+      const yOf = (u: number) => MARGIN.top + ((yRange.max - u) / spanU) * plotH;
       const palette = PALETTE[theme];
       ctx.clearRect(0, 0, rect.width, rect.height);
       ctx.fillStyle = theme === 'dark' ? '#101010' : '#ffffff';
@@ -65,8 +66,8 @@ export function Profile() {
       ctx.fillText(tick(frame.xMax), MARGIN.left + plotW, rect.height - MARGIN.bottom + 4);
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
-      ctx.fillText(tick(range.max), MARGIN.left - 6, MARGIN.top);
-      ctx.fillText(tick(range.min), MARGIN.left - 6, MARGIN.top + plotH);
+      ctx.fillText(tick(yRange.max), MARGIN.left - 6, MARGIN.top);
+      ctx.fillText(tick(yRange.min), MARGIN.left - 6, MARGIN.top + plotH);
       const stroke = (values: number[], color: string, width: number) => {
         ctx.beginPath();
         let open = false;
@@ -110,7 +111,7 @@ export function Profile() {
     observer.observe(canvas);
     paint();
     return () => observer.disconnect();
-  }, [heat, frame, theme, x0, t0, hidden, selectedId, partialN]);
+  }, [heat, frame, theme, x0, t0, hidden, selectedId, partialN, yRange]);
 
   if (!heat || !frame || heat.spatial !== 'x') return null;
 
@@ -136,6 +137,32 @@ export function Profile() {
       />
     </div>
   );
+}
+
+function sliceExtent(heat: HeatSolution, frame: FieldFrame, t: number): { min: number; max: number; width: number } {
+  const series = profileSeries(heat, frame, t, 0, [], null);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of series.u) {
+    if (!Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  const width = Number.isFinite(min) && Number.isFinite(max) ? max - min : 0;
+  return { min, max, width };
+}
+
+function frozenProfileRange(heat: HeatSolution, frame: FieldFrame): { min: number; max: number } {
+  const atMin = sliceExtent(heat, frame, frame.tMin);
+  const chosen = atMin.width < 1e-6 ? widerExtent(atMin, sliceExtent(heat, frame, frame.tMax)) : atMin;
+  return finiteExtent([chosen.min, chosen.max]);
+}
+
+function widerExtent(
+  first: { min: number; max: number; width: number },
+  second: { min: number; max: number; width: number },
+): { min: number; max: number; width: number } {
+  return second.width > first.width ? second : first;
 }
 
 function sampleAt(xs: number[], values: number[], x: number): number {

@@ -91,8 +91,14 @@ function TimeControl() {
   const [playing, setPlaying] = useState(false);
   const mode = solution?.family === 'heat' ? solution.modes[0] : undefined;
 
+  const show =
+    Boolean(frame) &&
+    (frame?.tMax ?? 0) > (frame?.tMin ?? 0) + 1e-9 &&
+    solution?.family !== 'characteristics' &&
+    !(solution?.family === 'heat' && solution.spatial !== 'x');
+
   useEffect(() => {
-    if (!playing || !frame) return;
+    if (!playing || !show || !frame) return;
     let handle = 0;
     let last = performance.now();
     const step = (now: number) => {
@@ -107,9 +113,10 @@ function TimeControl() {
     };
     handle = requestAnimationFrame(step);
     return () => cancelAnimationFrame(handle);
-  }, [playing, frame, setT0]);
+  }, [playing, frame, setT0, show]);
 
-  if (!frame || !(frame.tMax > frame.tMin + 1e-9)) return null;
+  if (!show || !frame) return null;
+  const readout = `${frame.tName} = ${Math.round(t0 * 1000) / 1000}`;
   const factor = mode && Number.isFinite(mode.lambda) ? Math.exp(-mode.lambda * Math.max(0, t0)) : null;
   return (
     <div className="parameter">
@@ -117,7 +124,7 @@ function TimeControl() {
         {playing ? 'Pause' : 'Play'}
       </button>
       <input
-        aria-label="Time"
+        aria-label={readout}
         type="range"
         min={frame.tMin}
         max={frame.tMax}
@@ -125,7 +132,7 @@ function TimeControl() {
         value={Math.min(frame.tMax, Math.max(frame.tMin, t0))}
         onChange={(event) => setT0(Number(event.target.value))}
       />
-      <span>{`t = ${Math.round(t0 * 1000) / 1000}`}</span>
+      <span>{readout}</span>
       {factor !== null && Number.isFinite(factor) ? <span>{`slowest factor ${Math.round(factor * 1000) / 1000}`}</span> : null}
     </div>
   );

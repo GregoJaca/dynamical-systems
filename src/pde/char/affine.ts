@@ -1,12 +1,13 @@
 /**
- * Linear equations whose speed dx/dτ is affine in x, or a product f(τ) h(x).
- * The characteristic foot and the transport ODE are then one-dimensional integrals.
+ * Linear equations whose speed dx/dτ is affine in x, or a product of a function of τ and a function of x.
+ * The picture integrates those ODEs numerically; the labels come from the concrete coefficients.
  */
 
 import { compileMath, exprToLatex } from '../expr';
 import type { CharCurve, CharProblem, PdeObject } from '../types';
 import type { BuiltChar } from './solveChar';
 import { constantOf, parameterValues } from './solveChar';
+import { cauchyWindow, characteristicOde, prettyTex } from './formula';
 
 type Scalar = (x: number, tau: number) => number;
 
@@ -31,7 +32,7 @@ export function solveAffine(problem: CharProblem): BuiltChar | null {
     const value = a(x, tau) / bb;
     return Number.isFinite(value) ? value : Number.NaN;
   };
-  const built = fitAffine(speed, data, tauName, problem, a, b, c, d) ?? fitProduct(speed, data, tauName, problem, b, c, d);
+  const built = fitAffine(speed, data, tauName, problem, b, c, d) ?? fitProduct(speed, data, tauName, problem, b, c, d);
   if (!built) return null;
   if (!stable(built.evaluate, data)) return null;
   return built;
@@ -42,7 +43,6 @@ function fitAffine(
   data: Cauchy,
   tauName: string,
   problem: CharProblem,
-  a: Scalar,
   b: Scalar,
   c: Scalar,
   d: Scalar,
@@ -59,20 +59,17 @@ function fitAffine(
   }
   const pOf = (tau: number) => speed(1, tau) - speed(0, tau);
   const qOf = (tau: number) => speed(0, tau);
-  const domain = windowFor(data);
-  const pTab = tabulate(pOf, domain.t[0], domain.t[1]);
-  const qTab = tabulate(qOf, domain.t[0], domain.t[1]);
-  const speedOf = (x: number, tau: number) => pTab(tau) * x + qTab(tau);
+  const domain = windowFor(problem, data);
+  const speedOf = (x: number, tau: number) => pOf(tau) * x + qOf(tau);
   const evaluate = (x: number, tau: number) => valueAt(x, tau, data, speedOf, b, c, d);
   const curves = feet(domain, data).map((x0, index) => ({
     id: `char-${index}`,
-    invariantLatex: `\\xi=${texNum(x0)}`,
+    invariantLatex: `x(${prettyTex(data.t0)})=${prettyTex(x0)}`,
     carriedLatex: `u\\ \\text{from}\\ g(${texNum(x0)})`,
     points: trajectory(x0, data, domain.t[1], speedOf, b, c, d),
   }));
-  const speedLatex = `\\frac{dx}{d${tauName}}=p(${tauName})\\,x+q(${tauName})`;
-  const formula = `\\xi\\ \\text{solves the linear ODE}\\ ${speedLatex}.\\ u=\\mu\\Big(g(\\xi)+\\int_{${texNum(data.t0)}}^{${tauName}}\\frac{d}{b\\mu}\\Big),\\ \\mu=\\exp\\int -\\frac{c}{b}.`;
-  return pack(problem, data, tauName, domain, evaluate, curves, formula, speedLatex, true, a, b);
+  const speedLatex = characteristicOde(problem, { pi: Math.PI, e: Math.E, ...parameterValues(problem) }, tauName);
+  return pack(problem, data, domain, evaluate, curves, speedLatex, b);
 }
 
 function fitProduct(
@@ -99,30 +96,26 @@ function fitProduct(
     }
   }
   if ([-0.5, 0.4, 1.7].every((x) => Math.abs(h(x) - h(xRef)) < 1e-8)) return null;
-  const domain = windowFor(data);
+  const domain = windowFor(problem, data);
   const speedOf = (x: number, tau: number) => f(tau) * h(x);
   const evaluate = (x: number, tau: number) => valueAt(x, tau, data, speedOf, b, c, d);
   const curves: CharCurve[] = feet(domain, data).map((x0, index) => ({
     id: `char-${index}`,
-    invariantLatex: `G(x)-F(${tauName})=G(${texNum(x0)})`,
+    invariantLatex: `x(${prettyTex(data.t0)})=${prettyTex(x0)}`,
     carriedLatex: `u\\ \\text{from}\\ g(${texNum(x0)})`,
     points: trajectory(x0, data, domain.t[1], speedOf, b, c, d),
   }));
-  const formula = `G(x)-F(${tauName})=G(\\xi),\\quad G'=1/h,\\ F'=f,\\quad \\frac{dx}{d${tauName}}=f(${tauName})\\,h(x).\\ u\\ \\text{is the transport of}\\ g(\\xi).`;
-  return pack(problem, data, tauName, domain, evaluate, curves, formula, `f(${tauName})\\,h(x)`, false, () => 0, b);
+  const speedLatex = characteristicOde(problem, { pi: Math.PI, e: Math.E, ...parameterValues(problem) }, tauName);
+  return pack(problem, data, domain, evaluate, curves, speedLatex, b);
 }
 
 function pack(
   problem: CharProblem,
   data: Cauchy,
-  tauName: string,
   domain: { x: [number, number]; t: [number, number] },
   evaluate: (x: number, tau: number) => number,
   curves: CharCurve[],
-  formula: string,
   speedLatex: string,
-  affine: boolean,
-  a: Scalar,
   b: Scalar,
 ): BuiltChar {
   const transverse = samples(domain.x[0], domain.x[1], 5).every((x) => Math.abs(b(x, data.t0)) > 1e-8);
@@ -130,47 +123,38 @@ function pack(
   const objects: PdeObject[] = [
     { id: 'characteristics', label: 'Characteristics', formulaLatex: speedLatex, group: 'characteristic', defaultOn: true },
     { id: 'data', label: 'Initial line', formulaLatex: dataLatex, group: 'boundary', defaultOn: true },
-    { id: 'solution', label: 'Solution along the foot', formulaLatex: formula, group: 'field', defaultOn: true },
   ];
   const worked = [
     problem.equationLatex,
-    affine
-      ? `The speed is affine in \\(x\\): \\(${speedLatex}\\). The foot \\(\\xi\\) on \\(${tauName}=${texNum(data.t0)}\\) is the solution of that linear ODE run backwards.`
-      : `The speed factors as \\(${speedLatex}\\). The invariant is the difference of the two antiderivatives, and \\(\\xi\\) is read off by Newton.`,
-    `Along a characteristic, \\(\\dfrac{du}{d${tauName}}=\\dfrac{d-cu}{b}\\). The initial line carries \\(${dataLatex}\\).`,
-    transverse
-      ? `\\(b\\neq 0\\) on the initial line, so the data are transverse and the Cauchy problem has one solution nearby.`
-      : `\\(b\\) vanishes somewhere on the initial line, so well-posedness fails at those points.`,
-  ].join(' ');
+    `The characteristic ODE is \\(${speedLatex}\\).`,
+    `The initial line is \\(${dataLatex}\\).`,
+    transverse ? '' : 'The initial line is not transverse.',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return {
     exact: true,
-    formulaLatex: formula,
-    generalLatex: formula,
+    formulaLatex: speedLatex,
+    generalLatex: speedLatex,
     evaluate,
     curves,
     dataCurve: samples(domain.x[0], domain.x[1], 24).map((x) => ({ x, t: data.t0, u: data.g(x) })),
     objects,
     notes: [
       { id: 'ode', title: 'Characteristic ODE', latex: speedLatex },
-      { id: 'transport', title: 'Transport of the data', latex: formula },
       { id: 'data', title: 'Initial line', latex: dataLatex },
-      {
-        id: 'transverse',
-        title: 'Well-posedness',
-        latex: transverse
-          ? `The initial line is transverse because the coefficient of \\(u_{${tauName}}\\) is not zero there.`
-          : `The coefficient of \\(u_{${tauName}}\\) vanishes on the initial line, so the data are not transverse.`,
-      },
+      ...(transverse
+        ? []
+        : [{ id: 'transverse', title: 'Not transverse', latex: 'The initial line is not transverse.' }]),
     ],
     workedLatex: worked,
     features: [],
     warnings: transverse ? [] : ['The initial line is not transverse.'],
-    transversalityLatex: transverse ? `b\\neq 0 on ${tauName}=${texNum(data.t0)}.` : 'Not transverse.',
+    transversalityLatex: transverse ? speedLatex : 'The initial line is not transverse.',
     domainX: domain.x,
     domainT: domain.t,
     residualKind: 'linear',
   };
-  void a;
 }
 
 function valueAt(x: number, tau: number, data: Cauchy, speed: Scalar, b: Scalar, c: Scalar, d: Scalar): number {
@@ -303,8 +287,8 @@ function compileCoeff(expr: string, params: Record<string, number>, vars: CharPr
   }
 }
 
-function windowFor(data: Cauchy): { x: [number, number]; t: [number, number] } {
-  return { x: [-2.5, 2.5], t: [Math.min(0, data.t0), Math.max(data.t0 + 1.5, 2)] };
+function windowFor(problem: CharProblem, data: Cauchy): { x: [number, number]; t: [number, number] } {
+  return cauchyWindow(problem, data.t0, data.gExpr);
 }
 
 function feet(domain: { x: [number, number] }, data: Cauchy): number[] {
@@ -313,19 +297,6 @@ function feet(domain: { x: [number, number] }, data: Cauchy): number[] {
 
 function samples(start: number, end: number, count: number): number[] {
   return linspace(start, end, count);
-}
-
-function tabulate(fn: (value: number) => number, start: number, end: number): (value: number) => number {
-  const steps = 240;
-  const h = (end - start) / steps || 1;
-  const values = new Float64Array(steps + 1);
-  for (let i = 0; i <= steps; i += 1) values[i] = fn(start + i * h);
-  return (value) => {
-    const slot = (value - start) / h;
-    const index = Math.min(steps - 1, Math.max(0, Math.floor(slot)));
-    const frac = Math.min(1, Math.max(0, slot - index));
-    return (values[index] ?? 0) * (1 - frac) + (values[index + 1] ?? 0) * frac;
-  };
 }
 
 function linspace(start: number, end: number, count: number): number[] {
@@ -342,6 +313,5 @@ function tex(expr: string): string {
 }
 
 function texNum(value: number): string {
-  if (!Number.isFinite(value)) return '0';
-  return String(Math.round(value * 1e6) / 1e6);
+  return prettyTex(value);
 }

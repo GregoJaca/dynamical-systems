@@ -90,18 +90,28 @@ export function splitMath(text: string): Piece[] {
   return pieces;
 }
 
+/** KaTeX has `aligned` and `gathered`, not `align` or `gather`. */
+function katexSource(tex: string): string {
+  return tex
+    .replace(/\\begin\{align\*?\}/g, '\\begin{aligned}')
+    .replace(/\\end\{align\*?\}/g, '\\end{aligned}')
+    .replace(/\\begin\{gather\*?\}/g, '\\begin{gathered}')
+    .replace(/\\end\{gather\*?\}/g, '\\end{gathered}');
+}
+
 function paintMath(target: HTMLElement, tex: string, display: boolean) {
-  const source = stripDelimiters(tex).tex;
+  const source = katexSource(stripDelimiters(tex).tex);
   if (!source) {
     target.textContent = '';
     return;
   }
-  if (looksLikeProse(source)) {
+  const displayMath = display || /\\begin\{(?:aligned|gathered|cases)\}/.test(source);
+  if (looksLikeProse(source) && !/\\begin\{/.test(source)) {
     target.textContent = readableProse(source);
     return;
   }
   try {
-    katex.render(source, target, { throwOnError: true, displayMode: display, strict: 'ignore' });
+    katex.render(source, target, { throwOnError: true, displayMode: displayMath, strict: 'ignore' });
   } catch {
     target.replaceChildren(document.createTextNode(readableProse(source)));
     return;

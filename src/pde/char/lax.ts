@@ -84,7 +84,7 @@ export function solveBurgers(problem: CharProblem): BuiltChar {
       ? extras.rarefactionLatex ?? 'u=(x-x_0)/t'
       : extras.shock?.latex ?? 'u'
     : `u=g(x-t f'(u))`;
-  const worked = workedBurgers(problem, data, flux, riemann, breaking, evaluate);
+  const worked = workedBurgers(problem, data, flux, riemann, breaking);
 
   return {
     exact: riemann !== null,
@@ -465,12 +465,11 @@ function workedBurgers(
   flux: Flux,
   riemann: Riemann | null,
   breaking: BuiltChar['breaking'],
-  evaluate: (x: number, t: number) => number,
 ): string {
   const lines = [
     problem.equationLatex,
     `This is \\(u_t+f(u)_x=0\\) with \\(f(u)=${flux.latex}\\). The characteristic speed is \\(f'(u)\\), so \\(u=g(x-t f'(u))\\) until breaking.`,
-    `The invariant along a ray is the value of \\(u\\). Eliminating the foot gives the implicit profile.`,
+    `The invariant along a ray is the value of \\(u\\). Eliminating the parameter gives the implicit profile.`,
     `Data: \\(u(x,${texNum(data.t0)})=${tex(data.gExpr)}\\).`,
   ];
   if (breaking) lines.push(`The first breaking time is \\(${breaking.latex}\\) at \\(x=${texNum(breaking.x)}\\).`);
@@ -483,7 +482,6 @@ function workedBurgers(
   } else {
     lines.push(`After breaking, the entropy solution is the Lax–Oleinik minimiser, not the multivalued characteristic profile. Equal-area places the shock where the two lobes match.`);
   }
-  lines.push(`Check: \\(u(0.4,1)=${texNum(evaluate(0.4, 1))}\\).`);
   return lines.join(' ');
 }
 

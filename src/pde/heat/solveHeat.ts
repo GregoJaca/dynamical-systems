@@ -21,6 +21,7 @@ import { erf, heatKernelConvolution, heatKernelValue } from './kernel';
 import { crankNicolson, sampleGrid, type NumericEnd } from './numeric';
 import { fitPolynomial, simpson } from './quadrature';
 import {
+  exactNumberLatex,
   exactTrigProjection,
   intervalSpectrum,
   periodicSpectrum,
@@ -237,11 +238,15 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
     return sum;
   };
   const original = (x: number, t: number) => factor(x, t) * series(x, t);
-  const terms = rows.map((row) => toModeTerm(row, left));
+  const display = makeDisplay(ends, k, length, left, domain);
+  stampFamilyPhi(modes, display);
+  const driven = rows.some((row) => Math.abs(row.fn) > 1e-8);
+  const finiteExpansion = projected.closed && sourceProjected.closed && !driven && rows.every((row) => row.exact);
+  const terms = rows.map((row) => toModeTerm(row, k, length));
   const lambda1 = dominantLambda(rows);
   const tMax = viewTime(lambda1);
-  const formula = seriesLatex(terms, lift, transformed, alpha, beta, k);
-  const worked = workedSeparation(terms, left, right, length, k, ends, lift, transformed, alpha, beta);
+  const formula = seriesLatex(terms, lift, transformed, alpha, beta, display, finiteExpansion);
+  const worked = workedSeparation(terms, display, lift, finiteExpansion);
   const nondim = sourceIsZero && bundle.sourceConstant === 0 && shouldNondimensionalize(k, left, right);
   if (homogeneousEnergy(leftEnd, rightEnd)) {
     used.add('energy');
@@ -264,14 +269,18 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
 
   const objects: PdeObject[] = [
     { id: 'surface', label: 'Solution', formulaLatex: formula, group: 'field', defaultOn: true },
-    ...terms.map((mode, index) => ({
-      id: mode.id,
-      label: `Mode ${mode.n}`,
-      formulaLatex: mode.phiLatex,
-      group: 'mode' as const,
-      defaultOn: index < 4,
-    })),
   ];
+  if (finiteExpansion && terms.length > 0 && terms.length <= 4 && explicitSum(terms) !== null) {
+    for (const mode of terms) {
+      objects.push({
+        id: mode.id,
+        label: `Mode ${mode.n}`,
+        formulaLatex: termLatex(mode),
+        group: 'mode',
+        defaultOn: true,
+      });
+    }
+  }
   if (lift.steady && !nearlyZeroFunction(lift.w, left, right)) {
     objects.push({ id: 'steady', label: 'Steady state', formulaLatex: lift.latex, group: 'steady', defaultOn: true });
   }
@@ -344,10 +353,12 @@ function finishPeriodic(
     .filter((row) => Math.abs(row.a0) > 1e-8);
   const series = (x: number, t: number) => rows.reduce((sum, row) => sum + coefficientAt(row.a0, row.fn, row.mode.lambda, t) * row.mode.phi(x), 0);
   const original = (x: number, t: number) => factor(x, t) * series(x, t);
-  const terms = rows.map((row) => toModeTerm(row, left));
+  const finiteExpansion = projected.closed && rows.every((row) => row.exact);
+  const display = periodicDisplay(k, length, left);
+  const terms = rows.map((row) => toModeTerm(row, k, length));
   const lambda1 = dominantLambda(rows);
   const tMax = viewTime(lambda1);
-  const formula = seriesLatex(terms, emptyLift(), transformed, alpha, beta, k);
+  const formula = seriesLatex(terms, emptyLift(), transformed, alpha, beta, display, finiteExpansion);
   used.add('separation');
   const frames = [frame('original', 'u', formula, 'x', 't', left, right, 0, tMax, false, original)];
   const simplified = simplifiedFrame(original, series, transformed, shouldNondimensionalize(k, left, right), left, right, length, k, alpha, beta, tMax, formula);
@@ -363,7 +374,7 @@ function finishPeriodic(
   solution.lambda1 = lambda1;
   solution.features = orderFeatures(used);
   solution.residual = measureHeat(problem, bundle, original, left, right, tMax, false);
-  solution.workedLatex = workedSeparation(terms, left, right, length, k, { left: 'dirichlet', right: 'dirichlet' }, emptyLift(), transformed, alpha, beta);
+  solution.workedLatex = workedSeparation(terms, display, emptyLift(), finiteExpansion);
   return solution;
 }
 
@@ -492,14 +503,6 @@ function solveRectangle(problem: HeatProblem, bundle: Bundle): HeatSolution {
   const formula = 'u(x,y,t)=\\sum_{n,m} a_{nm} e^{-\\lambda_{nm} t}\\sin(n\\pi(x-x_0)/L_x)\\sin(m\\pi(y-y_0)/L_y)';
   const tMax = viewTime(terms[0]?.lambda);
   const original = frame('original', 'u', formula, 'x', 't', x0, x1, 0, tMax, false, evaluate, y0, y1, 'y');
-  const leading = terms[0];
-  const modeNote = leading
-    ? `The series has ${terms.length} nonzero term${terms.length === 1 ? '' : 's'}. The slowest decay on a fixed colour scale is $e^{-${leading.lambdaLatex} t}$.`
-    : 'No mode passed the threshold.';
-  const termLatex = terms
-    .slice(0, 4)
-    .map((mode) => `${mode.amplitudeLatex}\\,e^{-${mode.lambdaLatex} t}\\,${mode.phiLatex}`)
-    .join('\\\\ ');
   const solution = blank(
     problem,
     'product',
@@ -507,14 +510,11 @@ function solveRectangle(problem: HeatProblem, bundle: Bundle): HeatSolution {
     formula,
     [original],
     terms,
-    [
-      { id: 'modes', title: 'Modes that are actually present', latex: termLatex || modeNote },
-      { id: 'decay', title: 'What the picture should show', latex: modeNote },
-    ],
+    [{ id: 'modes', title: 'Solution', latex: formula }],
     [],
     'xy',
   );
-  solution.objects = modeObjects(formula, terms);
+  solution.objects = modeObjects(formula, terms, 'u=0\\ \\text{on the edge}');
   solution.features = orderFeatures(new Set<PdeTag>(['separation', 'rectangle']));
   solution.lambda1 = terms[0]?.lambda;
   solution.maximumLatex = 'The maximum and minimum of $u$ are attained on the parabolic boundary.';
@@ -558,7 +558,7 @@ function solveDisk(problem: HeatProblem, bundle: Bundle): HeatSolution {
   const tMax = viewTime(terms[0]?.lambda);
   const original = frame('original', 'u', formula, 'r', 't', 0, radius, 0, tMax, false, evaluate);
   const notes: NoteBlock[] = [
-    { id: 'bessel', title: 'Fourier–Bessel series', latex: 'The first positive zero of $J_0$ is near $2.4048$. Coefficients use $c_n=2/(R^2 J_1(z_n)^2)\\int_0^R g(r) J_0(z_n r/R) r\\,dr$.' },
+    { id: 'bessel', title: 'Fourier–Bessel series', latex: '$J_0(z_n)=0$ and $c_n=\\dfrac{2}{R^2 J_1(z_n)^2}\\int_0^R g(r) J_0(z_n r/R)\\, r\\,dr$.' },
   ];
   const solution = blank(problem, 'bessel', true, formula, [original], terms, notes, [], 'radial');
   solution.objects = modeObjects(formula, terms);
@@ -879,12 +879,17 @@ interface RowDraft {
   forcingC?: number | null;
 }
 
-function projectAll(g: (x: number) => number, modes: SpectralMode[], left: number, right: number): { values: Array<{ amplitude: number; exact: boolean }> } {
-  if (modes.length === 0) return { values: [] };
-  if (nearlyZeroFunction(g, left, right)) return { values: modes.map(() => ({ amplitude: 0, exact: true })) };
+function projectAll(
+  g: (x: number) => number,
+  modes: SpectralMode[],
+  left: number,
+  right: number,
+): { values: Array<{ amplitude: number; exact: boolean }>; closed: boolean } {
+  if (modes.length === 0) return { values: [], closed: true };
+  if (nearlyZeroFunction(g, left, right)) return { values: modes.map(() => ({ amplitude: 0, exact: true })), closed: true };
   const spectral = exactTrigProjection(g, modes, left, right);
-  if (spectral) return { values: spectral };
-  return { values: modes.map((mode) => projectMode(g, mode, left, right)) };
+  if (spectral) return { values: spectral, closed: true };
+  return { values: modes.map((mode) => projectMode(g, mode, left, right)), closed: false };
 }
 
 function coefficientAt(a0: number, fn: number, lambda: number, t: number, forcingC?: number | null): number {
@@ -898,55 +903,436 @@ function coefficientAt(a0: number, fn: number, lambda: number, t: number, forcin
   return a0 * decay + (fn * (grow - decay)) / (forcingC + lambda);
 }
 
-function toModeTerm(row: RowDraft, left: number): ModeTerm {
+function toModeTerm(row: RowDraft, k: number, length: number): ModeTerm {
   const id = row.mode.family === 'fourier-sin' ? `mode-${row.mode.n}-sin` : `mode-${row.mode.n}`;
+  const amplitudeLatex = simpleAmplitudeLatex(row.a0) ?? trimNumber(row.a0);
   return {
     id,
     n: row.mode.n,
     lambda: row.mode.lambda,
-    lambdaLatex: trimNumber(row.mode.lambda),
+    lambdaLatex: symbolicLambda(row.mode, k, length),
     amplitude: row.a0,
-    amplitudeLatex: trimNumber(row.a0),
+    amplitudeLatex,
     numericAmplitude: !row.exact,
     phiLatex: row.mode.phiLatex,
     phi: (x) => row.mode.phi(x),
     value: (x, t) => coefficientAt(row.a0, row.fn, row.mode.lambda, t, row.forcingC) * row.mode.phi(x),
   };
-  void left;
 }
 
-function seriesLatex(terms: ModeTerm[], lift: Lift, transformed: boolean, alpha: number, beta: number, k: number): string {
-  const pieces = terms.slice(0, 6).map((mode) => {
-    const amp = Math.abs(mode.amplitude - 1) < 1e-8 ? '' : `${mode.amplitudeLatex}\\,`;
-    const decay = mode.lambda === 0 ? amp || '1' : Math.abs(mode.lambda - 1) < 1e-8 ? `${amp}e^{-t}` : `${amp}e^{-${mode.lambdaLatex} t}`;
-    return `${decay}\\,${mode.phiLatex}`;
-  });
-  let body = pieces.length > 0 ? pieces.join('+') : '0';
-  if (Math.abs(lift.growth) > 0) body = `${trimNumber(lift.growth)}\\,t+${body}`;
-  if (!nearlyZeroFunction(lift.w, 0, 1) && lift.latex !== '0') body = `${lift.latex}+${body}`;
-  if (transformed) body = `e^{${trimNumber(alpha)} x+${trimNumber(beta)} t}\\left(${body}\\right)`;
-  void k;
-  return `u(x,t)=${body}`;
+type SpectrumKind = 'dd' | 'nn' | 'half-sin' | 'half-cos' | 'robin-neumann' | 'neumann-robin' | 'dirichlet-robin' | 'robin-dirichlet' | 'periodic';
+
+interface SeriesDisplay {
+  kind: SpectrumKind;
+  k: number;
+  length: number;
+  left: number;
+  hLatex: string;
 }
 
-function workedSeparation(
+function seriesLatex(
   terms: ModeTerm[],
-  left: number,
-  right: number,
-  length: number,
-  k: number,
-  ends: IntervalEnds,
   lift: Lift,
   transformed: boolean,
   alpha: number,
   beta: number,
+  display: SeriesDisplay,
+  finite: boolean,
 ): string {
-  const first = terms[0];
-  const sample = first ? `a_{${first.n}}=${first.amplitudeLatex},\\ \\lambda_{${first.n}}=${first.lambdaLatex}` : 'a_n=0';
-  return `\\begin{align} L&=${trimNumber(length)},\\quad k=${trimNumber(k)},\\\\ ${transformed ? `\\alpha&=${trimNumber(alpha)},\\ \\beta=${trimNumber(beta)},\\\\` : ''} ${lift.note ? 'u&=w+v,\\\\' : ''} ${sample},\\\\ u(x,t)&=${terms.length ? `\\sum a_n(t)\\,\\phi_n(x)` : 'w(x)'}.\\end{align}`;
-  void left;
-  void right;
-  void ends;
+  const explicit = finite ? explicitSum(terms) : null;
+  if (explicit !== null) return `u(x,t)=${decorate(explicit, lift, transformed, alpha, beta)}`;
+  if (terms.length === 0) return `u(x,t)=${decorate('0', lift, transformed, alpha, beta)}`;
+  const sum = decorate(symbolicSum(display), lift, transformed, alpha, beta);
+  const tail = seriesTail(display);
+  return tail ? `u(x,t)=${sum},\\quad ${tail}` : `u(x,t)=${sum}`;
+}
+
+function workedSeparation(terms: ModeTerm[], display: SeriesDisplay, lift: Lift, finite: boolean): string {
+  const explicit = finite ? explicitSum(terms) : null;
+  if (explicit !== null && explicit !== '0') {
+    return `\\begin{aligned} u(x,t)&=${explicit},\\\\ &${eigenPhrase(display)}\\end{aligned}`;
+  }
+  if (terms.length === 0) return `\\begin{aligned} u(x,t)&=${lift.latex}.\\end{aligned}`;
+  return infiniteWorked(display);
+}
+
+function decorate(body: string, lift: Lift, transformed: boolean, alpha: number, beta: number): string {
+  let next = body;
+  if (Math.abs(lift.growth) > 0) next = `${trimNumber(lift.growth)}\\,t+${next}`;
+  if (!nearlyZeroFunction(lift.w, 0, 1) && lift.latex !== '0') next = `${lift.latex}+${next}`;
+  if (transformed) next = `e^{${trimNumber(alpha)} x+${trimNumber(beta)} t}\\left(${next}\\right)`;
+  return next;
+}
+
+function explicitSum(terms: ModeTerm[]): string | null {
+  if (terms.length === 0) return '0';
+  if (terms.length > 12) return null;
+  const pieces: string[] = [];
+  for (const mode of terms) {
+    if (mode.numericAmplitude) return null;
+    if (mode.phiLatex.includes('\\mu_n') || mode.phiLatex.includes('\\approx') || /\\d+\\.\\d/.test(mode.phiLatex)) return null;
+    if (mode.lambdaLatex.includes('\\mu') || mode.lambdaLatex.includes('\\approx') || /\d+\.\d/.test(mode.lambdaLatex)) return null;
+    const amp = simpleAmplitudeLatex(mode.amplitude);
+    if (amp === null) return null;
+    pieces.push(formatTerm(amp, mode.lambdaLatex, mode.phiLatex));
+  }
+  return joinPieces(pieces);
+}
+
+function termLatex(mode: ModeTerm): string {
+  const amp = simpleAmplitudeLatex(mode.amplitude) ?? mode.amplitudeLatex;
+  return formatTerm(amp, mode.lambdaLatex, mode.phiLatex);
+}
+
+function formatTerm(amp: string, lambdaLatex: string, phi: string): string {
+  const decay = decayOf(lambdaLatex);
+  const spatial = phi === '1' ? '' : phi;
+  if (!decay && !spatial) return amp;
+  if (!decay) {
+    if (amp === '1') return spatial;
+    if (amp === '-1') return `-${spatial}`;
+    return `${amp} ${spatial}`;
+  }
+  if (!spatial) {
+    if (amp === '1') return decay;
+    if (amp === '-1') return `-${decay}`;
+    return `${amp} ${decay}`;
+  }
+  if (amp === '1') return `${decay}${spatial}`;
+  if (amp === '-1') return `-${decay}${spatial}`;
+  return `${amp} ${decay}${spatial}`;
+}
+
+function decayOf(lambdaLatex: string): string {
+  if (lambdaLatex === '0') return '';
+  if (lambdaLatex === '1') return 'e^{-t}';
+  if (lambdaLatex.startsWith('-')) return `e^{${lambdaLatex} t}`;
+  return `e^{-${lambdaLatex} t}`;
+}
+
+function joinPieces(parts: string[]): string {
+  let out = '';
+  for (const part of parts) {
+    if (!out) out = part;
+    else if (part.startsWith('-')) out += part;
+    else out += `+${part}`;
+  }
+  return out;
+}
+
+function simpleAmplitudeLatex(value: number): string | null {
+  if (!Number.isFinite(value)) return null;
+  const nearest = Math.round(value);
+  if (Math.abs(value - nearest) <= 1e-6 * (1 + Math.abs(nearest))) return String(nearest);
+  const direct = exactNumberLatex(value);
+  if (direct) return direct;
+  const overPi = exactNumberLatex(value * Math.PI);
+  if (overPi === null) return null;
+  if (overPi === '1') return '\\frac{1}{\\pi}';
+  if (overPi === '-1') return '-\\frac{1}{\\pi}';
+  const fraction = overPi.match(/^(-)?\\frac\{(\d+)\}\{(\d+)\}$/);
+  if (fraction) return `${fraction[1] ?? ''}\\frac{${fraction[2]}}{${fraction[3]}\\pi}`;
+  if (/^-?\d+$/.test(overPi)) {
+    return overPi.startsWith('-') ? `-\\frac{${overPi.slice(1)}}{\\pi}` : `\\frac{${overPi}}{\\pi}`;
+  }
+  return null;
+}
+
+function symbolicLambda(mode: SpectralMode, k: number, length: number): string {
+  if (mode.growing) return `-${muDecay(k)}`;
+  if (mode.family === 'const' || Math.abs(mode.mu) < 1e-12) return '0';
+  const index = eigenvalueIndex(mode, length);
+  if (index !== null) {
+    const scaled = scaledLambda(k, index, length);
+    if (scaled) return scaled;
+  }
+  const core = muDecay(k);
+  return mode.growing ? `-${core}` : core;
+}
+
+function eigenvalueIndex(mode: SpectralMode, length: number): number | null {
+  const n = mode.n;
+  const candidates = [n, n + 0.5, n - 0.5, 2 * n];
+  for (const index of candidates) {
+    if (index <= 0) continue;
+    const mu = (index * Math.PI) / length;
+    if (Math.abs(mu - mode.mu) <= 1e-6 * (1 + Math.abs(mode.mu))) return index;
+  }
+  return null;
+}
+
+function scaledLambda(k: number, index: number, length: number): string | null {
+  if (nearly(length, Math.PI)) return exactNumberLatex(k * index * index);
+  if (nearly(length, 1)) return timesPiSquare(k * index * index);
+  const asPi = length / Math.PI;
+  if (exactNumberLatex(asPi)) return exactNumberLatex((k * index * index) / (asPi * asPi));
+  if (exactNumberLatex(length)) return timesPiSquare((k * index * index) / (length * length));
+  return null;
+}
+
+function timesPiSquare(coeff: number): string | null {
+  const latex = exactNumberLatex(coeff);
+  if (latex === null) return null;
+  if (latex === '0') return '0';
+  if (latex === '1') return '\\pi^2';
+  if (latex === '-1') return '-\\pi^2';
+  const fraction = latex.match(/^(-)?\\frac\{(\d+)\}\{(\d+)\}$/);
+  if (fraction) return `${fraction[1] ?? ''}\\frac{${fraction[2]}\\pi^2}{${fraction[3]}}`;
+  return `${latex}\\pi^2`;
+}
+
+function muDecay(k: number): string {
+  const kText = exactNumberLatex(k);
+  if (kText === '1') return '\\mu_n^2';
+  if (kText) return `${kText}\\mu_n^2`;
+  return 'k\\mu_n^2';
+}
+
+function patternLambda(k: number, length: number, index: string): string {
+  const kText = exactNumberLatex(k) ?? 'k';
+  const squared = index === 'n' ? 'n^2' : index === '2n' ? '4n^2' : `(${index})^2`;
+  if (nearly(length, Math.PI)) return kText === '1' ? squared : `${kText}${squared}`;
+  if (nearly(length, 1)) return kText === '1' ? `${squared}\\pi^2` : `${kText}${squared}\\pi^2`;
+  const span = placeLatex(length);
+  if (kText === '1') return `\\frac{${squared}\\pi^2}{${span}^2}`;
+  return `\\frac{${kText}${squared}\\pi^2}{${span}^2}`;
+}
+
+function makeDisplay(
+  ends: IntervalEnds,
+  k: number,
+  length: number,
+  left: number,
+  domain: Extract<HeatProblem['domain'], { kind: 'interval' }>,
+): SeriesDisplay {
+  const robinEnd = ends.left === 'robin' ? domain.left : ends.right === 'robin' ? domain.right : null;
+  const hValue = ends.left === 'robin' ? (ends.hLeft ?? 0) : (ends.hRight ?? 0);
+  return { kind: displayKind(ends), k, length, left, hLatex: coefficientLatex(robinEnd?.hExpr, hValue) };
+}
+
+function periodicDisplay(k: number, length: number, left: number): SeriesDisplay {
+  return { kind: 'periodic', k, length, left, hLatex: '0' };
+}
+
+function displayKind(ends: IntervalEnds): SpectrumKind {
+  if (ends.left === 'dirichlet' && ends.right === 'dirichlet') return 'dd';
+  if (ends.left === 'neumann' && ends.right === 'neumann') return 'nn';
+  if (ends.left === 'dirichlet' && ends.right === 'neumann') return 'half-sin';
+  if (ends.left === 'neumann' && ends.right === 'dirichlet') return 'half-cos';
+  if (ends.left === 'robin' && ends.right === 'neumann') return 'robin-neumann';
+  if (ends.left === 'neumann' && ends.right === 'robin') return 'neumann-robin';
+  if (ends.left === 'dirichlet' && ends.right === 'robin') return 'dirichlet-robin';
+  return 'robin-dirichlet';
+}
+
+function coefficientLatex(expr: string | undefined, value: number): string {
+  if (expr) {
+    try {
+      return exprToLatex(expr).replace(/\s+/g, '');
+    } catch {
+      /* numeric fallback */
+    }
+  }
+  return exactNumberLatex(value) ?? trimNumber(value);
+}
+
+function stampFamilyPhi(modes: SpectralMode[], display: SeriesDisplay): void {
+  if (display.kind !== 'robin-neumann' && display.kind !== 'neumann-robin') return;
+  const phi = robinPhiBody(display);
+  for (const mode of modes) {
+    if (mode.family === 'sinh' && !mode.growing) mode.phiLatex = phi;
+  }
+}
+
+function symbolicSum(display: SeriesDisplay): string {
+  const rate = muDecay(display.k);
+  if (display.kind === 'robin-neumann' || display.kind === 'neumann-robin') {
+    return `\\sum_{n=1}^{\\infty} c_n e^{-${rate} t}\\phi_n(x)`;
+  }
+  if (display.kind === 'dirichlet-robin' || display.kind === 'robin-dirichlet') {
+    const arg = display.kind === 'dirichlet-robin' ? robinArgument(display, false) : robinArgument(display, true);
+    return `\\sum_{n=1}^{\\infty} c_n e^{-${rate} t}\\sin(${arg})`;
+  }
+  if (display.kind === 'dd') {
+    return `\\sum_{n=1}^{\\infty} c_n e^{-${patternLambda(display.k, display.length, 'n')} t}${sinePattern(display, 'n')}`;
+  }
+  if (display.kind === 'nn') {
+    const decay = patternLambda(display.k, display.length, 'n');
+    return `c_0+\\sum_{n=1}^{\\infty} c_n e^{-${decay} t}${cosinePattern(display, 'n')}`;
+  }
+  if (display.kind === 'half-sin' || display.kind === 'half-cos') {
+    const decay = patternLambda(display.k, display.length, 'n+\\tfrac{1}{2}');
+    const phi = display.kind === 'half-sin' ? halfPattern(display, 'sin') : halfPattern(display, 'cos');
+    return `\\sum_{n=0}^{\\infty} c_n e^{-${decay} t}${phi}`;
+  }
+  const decay = patternLambda(display.k, display.length, '2n');
+  const angle = fourierAngle(display);
+  return `a_0+\\sum_{n=1}^{\\infty} e^{-${decay} t}\\left(a_n\\cos(${angle})+b_n\\sin(${angle})\\right)`;
+}
+
+function seriesTail(display: SeriesDisplay): string {
+  if (display.kind === 'robin-neumann' || display.kind === 'neumann-robin') {
+    const root = robinRoot(display);
+    return `\\phi_n(x)=${robinPhiBody(display)},\\quad \\mu_n=${root.mu},\\ ${root.eq}`;
+  }
+  if (display.kind === 'dirichlet-robin' || display.kind === 'robin-dirichlet') {
+    const h = display.kind === 'robin-dirichlet' ? negateSymbol(display.hLatex) : display.hLatex;
+    const root = robinProduct(h, placeLatex(display.length));
+    return `\\mu_n=\\theta_n/${placeLatex(display.length)},\\ \\theta_n\\cos\\theta_n${root}\\sin\\theta_n=0`;
+  }
+  return '';
+}
+
+function infiniteWorked(display: SeriesDisplay): string {
+  const a = placeLatex(display.left);
+  const b = placeLatex(display.left + display.length);
+  if (display.kind === 'robin-neumann' || display.kind === 'neumann-robin') {
+    const root = robinRoot(display);
+    const rate = muDecay(display.k);
+    return `\\begin{aligned} \\phi_n(x)&=${robinPhiBody(display)},\\\\ \\mu_n&=${root.mu},\\quad ${root.eq},\\\\ c_n&=\\frac{\\int_{${a}}^{${b}} g(x)\\phi_n(x)\\,dx}{\\int_{${a}}^{${b}}\\phi_n(x)^2\\,dx},\\\\ u(x,t)&=\\sum_{n=1}^{\\infty} c_n e^{-${rate} t}\\phi_n(x).\\end{aligned}`;
+  }
+  if (display.kind === 'dd' || display.kind === 'half-sin' || display.kind === 'half-cos' || display.kind === 'dirichlet-robin' || display.kind === 'robin-dirichlet') {
+    return trigWorked(display, a, b);
+  }
+  if (display.kind === 'nn') {
+    const lam = patternLambda(display.k, display.length, 'n');
+    const phi = cosinePattern(display, 'n');
+    return `\\begin{aligned} \\phi_0(x)&=1,\\quad \\phi_n(x)=${phi},\\\\ \\lambda_n&=${lam},\\\\ c_0&=${oneOverL(display.length)}\\int_{${a}}^{${b}} g(x)\\,dx,\\quad c_n=${twoOverL(display.length)}\\int_{${a}}^{${b}} g(x)${phi}\\,dx,\\\\ u(x,t)&=\\sum_{n=0}^{\\infty} c_n e^{-\\lambda_n t}\\phi_n(x).\\end{aligned}`;
+  }
+  const decay = patternLambda(display.k, display.length, '2n');
+  const angle = fourierAngle(display);
+  return `\\begin{aligned} u(x,t)&=a_0+\\sum_{n=1}^{\\infty} e^{-${decay} t}\\left(a_n\\cos(${angle})+b_n\\sin(${angle})\\right),\\\\ a_0&=${oneOverL(display.length)}\\int_{${a}}^{${b}} g,\\quad a_n,b_n=${twoOverL(display.length)}\\int_{${a}}^{${b}} g\\,\\{\\cos,\\sin\\}.\\end{aligned}`;
+}
+
+function trigWorked(display: SeriesDisplay, a: string, b: string): string {
+  if (display.kind === 'dirichlet-robin' || display.kind === 'robin-dirichlet') {
+    const reflected = display.kind === 'robin-dirichlet';
+    const phi = `\\sin(${reflected ? robinArgument(display, true) : robinArgument(display, false)})`;
+    const h = reflected ? negateSymbol(display.hLatex) : display.hLatex;
+    const root = robinProduct(h, placeLatex(display.length));
+    const rate = muDecay(display.k);
+    return `\\begin{aligned} \\phi_n(x)&=${phi},\\\\ \\mu_n&=\\theta_n/${placeLatex(display.length)},\\quad \\theta_n\\cos\\theta_n${root}\\sin\\theta_n=0,\\\\ c_n&=\\frac{\\int_{${a}}^{${b}} g(x)\\phi_n(x)\\,dx}{\\int_{${a}}^{${b}}\\phi_n(x)^2\\,dx},\\\\ u(x,t)&=\\sum_{n=1}^{\\infty} c_n e^{-${rate} t}\\phi_n(x).\\end{aligned}`;
+  }
+  const half = display.kind === 'half-sin' || display.kind === 'half-cos';
+  const index = half ? 'n+\\tfrac{1}{2}' : 'n';
+  const phi = display.kind === 'half-cos' ? halfPattern(display, 'cos') : display.kind === 'half-sin' ? halfPattern(display, 'sin') : sinePattern(display, 'n');
+  const lam = patternLambda(display.k, display.length, index);
+  const sum = half ? '\\sum_{n=0}^{\\infty}' : '\\sum_{n=1}^{\\infty}';
+  return `\\begin{aligned} \\phi_n(x)&=${phi},\\\\ \\lambda_n&=${lam},\\\\ c_n&=${twoOverL(display.length)}\\int_{${a}}^{${b}} g(x)\\phi_n(x)\\,dx,\\\\ u(x,t)&=${sum} c_n e^{-\\lambda_n t}\\phi_n(x).\\end{aligned}`;
+}
+
+function eigenPhrase(display: SeriesDisplay): string {
+  if (display.kind === 'dd' || display.kind === 'nn' || display.kind === 'periodic') {
+    const index = display.kind === 'periodic' ? '2n' : 'n';
+    return `\\text{these are eigenfunctions, }\\lambda_n=${patternLambda(display.k, display.length, index)}.`;
+  }
+  if (display.kind === 'half-sin' || display.kind === 'half-cos') {
+    return `\\text{these are eigenfunctions, }\\lambda_n=${patternLambda(display.k, display.length, 'n+\\tfrac{1}{2}')}.`;
+  }
+  return '\\text{these are eigenfunctions.}';
+}
+
+function robinPhiBody(display: SeriesDisplay): string {
+  const arg = robinArgument(display, display.kind === 'neumann-robin');
+  const coeff = negateSymbol(display.hLatex);
+  if (coeff === '0' || coeff === '-0') return `\\cos(${arg})`;
+  if (coeff.startsWith('-')) return `\\cos(${arg})-(${stripParen(coeff.slice(1))}/\\mu_n)\\sin(${arg})`;
+  return `\\cos(${arg})+(${stripParen(coeff)}/\\mu_n)\\sin(${arg})`;
+}
+
+function robinArgument(display: SeriesDisplay, flip: boolean): string {
+  if (!flip) {
+    if (nearly(display.left, 0)) return '\\mu_n x';
+    return `\\mu_n(x-${placeLatex(display.left)})`;
+  }
+  return `\\mu_n(${placeLatex(display.left + display.length)}-x)`;
+}
+
+function robinRoot(display: SeriesDisplay): { mu: string; eq: string } {
+  const span = placeLatex(display.length);
+  const mu = span === '1' ? '\\theta_n' : `\\theta_n/${span}`;
+  return { mu, eq: `\\theta_n\\sin\\theta_n${robinProduct(display.hLatex, span)}\\cos\\theta_n=0` };
+}
+
+function robinProduct(hLatex: string, span: string): string {
+  const h = stripParen(hLatex.replace(/\s+/g, ''));
+  const negative = h.startsWith('-');
+  let body = negative ? h.slice(1) : h.replace(/^\+/, '');
+  body = stripParen(body);
+  if (body === '1') body = '';
+  const lengthPart = span === '1' ? '' : span;
+  const combined = `${body}${lengthPart}` || '1';
+  return negative ? `-${combined}` : `+${combined}`;
+}
+
+function negateSymbol(hLatex: string): string {
+  const h = stripParen(hLatex.replace(/\s+/g, ''));
+  if (h.startsWith('-')) return stripParen(h.slice(1)) || '0';
+  if (h.startsWith('+')) return `-${stripParen(h.slice(1))}`;
+  if (h === '0') return '0';
+  return `-${h}`;
+}
+
+function stripParen(value: string): string {
+  if (value.startsWith('(') && value.endsWith(')')) return value.slice(1, -1);
+  return value;
+}
+
+function sinePattern(display: SeriesDisplay, index: string): string {
+  return `\\sin(${linearAngle(display, index)})`;
+}
+
+function cosinePattern(display: SeriesDisplay, index: string): string {
+  return `\\cos(${linearAngle(display, index)})`;
+}
+
+function linearAngle(display: SeriesDisplay, index: string): string {
+  if (nearly(display.left, 0) && nearly(display.length, Math.PI)) return index === 'n' ? 'nx' : `(${index})x`;
+  if (nearly(display.left, 0) && nearly(display.length, 1)) return index === 'n' ? 'n\\pi x' : `(${index})\\pi x`;
+  const span = placeLatex(display.length);
+  const start = placeLatex(display.left);
+  const freq = index === 'n' ? 'n\\pi' : `(${index})\\pi`;
+  if (start === '0') return `\\frac{${freq} x}{${span}}`;
+  return `\\frac{${freq}(x-${start})}{${span}}`;
+}
+
+function halfPattern(display: SeriesDisplay, fn: 'sin' | 'cos'): string {
+  const name = fn === 'sin' ? '\\sin' : '\\cos';
+  if (nearly(display.left, 0) && nearly(display.length, Math.PI)) return `${name}\\left((n+\\tfrac{1}{2})x\\right)`;
+  if (nearly(display.left, 0) && nearly(display.length, 1)) return `${name}\\left((n+\\tfrac{1}{2})\\pi x\\right)`;
+  const span = placeLatex(display.length);
+  return `${name}\\left(\\frac{(n+\\tfrac{1}{2})\\pi x}{${span}}\\right)`;
+}
+
+function fourierAngle(display: SeriesDisplay): string {
+  const span = placeLatex(display.length);
+  if (nearly(display.left, 0) && span === '\\pi') return '2nx';
+  if (nearly(display.left, 0)) return `\\frac{2n\\pi x}{${span}}`;
+  return `\\frac{2n\\pi(x-${placeLatex(display.left)})}{${span}}`;
+}
+
+function twoOverL(length: number): string {
+  const span = placeLatex(length);
+  if (span === '1') return '2';
+  return `\\frac{2}{${span}}`;
+}
+
+function oneOverL(length: number): string {
+  const span = placeLatex(length);
+  if (span === '1') return '1';
+  return `\\frac{1}{${span}}`;
+}
+
+function placeLatex(value: number): string {
+  if (nearly(value, 0)) return '0';
+  if (nearly(value, Math.PI)) return '\\pi';
+  if (nearly(value, 2 * Math.PI)) return '2\\pi';
+  const exact = exactNumberLatex(value);
+  if (exact && /^-?\d+$/.test(exact)) return exact;
+  const ratio = exactNumberLatex(value / Math.PI);
+  if (ratio === '1') return '\\pi';
+  if (ratio && /^-?\d+$/.test(ratio)) return `${ratio}\\pi`;
+  return exact ?? trimNumber(value);
 }
 
 function simplifiedFrame(
@@ -1099,18 +1485,20 @@ function blank(
   void problem;
 }
 
-function modeObjects(formula: string, terms: ModeTerm[]): PdeObject[] {
-  return [
+function modeObjects(formula: string, terms: ModeTerm[], boundary?: string): PdeObject[] {
+  const shown = terms.length <= 4 ? terms : [];
+  const objects: PdeObject[] = [
     { id: 'surface', label: 'Solution', formulaLatex: formula, group: 'field', defaultOn: true },
-    ...terms.map((mode, index) => ({
+    ...shown.map((mode) => ({
       id: mode.id,
       label: mode.m ? `Mode ${mode.n},${mode.m}` : `Mode ${mode.n}`,
       formulaLatex: mode.phiLatex,
       group: 'mode' as const,
-      defaultOn: index < 4,
+      defaultOn: true,
     })),
-    { id: 'boundary', label: 'Boundary', formulaLatex: 'u=0\\ \\text{on the edge of the rectangle}', group: 'boundary', defaultOn: true },
   ];
+  if (boundary) objects.push({ id: 'boundary', label: 'Boundary', formulaLatex: boundary, group: 'boundary', defaultOn: true });
+  return objects;
 }
 
 function curves(left: number, right: number, tMax: number, domain: Extract<HeatProblem['domain'], { kind: 'interval' }>): Polyline[] {
@@ -1216,7 +1604,16 @@ function convectionNote(alpha: number, beta: number, b: number, c: number, k: nu
 }
 
 function boundaryLatex(domain: Extract<HeatProblem['domain'], { kind: 'interval' }>): string {
-  return `${domain.left.kind},\\ ${domain.right.kind}`;
+  return `${endFormula(domain.left)},\\ ${endFormula(domain.right)}`;
+}
+
+function endFormula(end: EndCondition): string {
+  const at = exprToLatex(end.at);
+  const value = exprToLatex(end.valueExpr);
+  if (end.kind === 'dirichlet') return `u(${at},t)=${value}`;
+  if (end.kind === 'neumann') return `u_x(${at},t)=${value}`;
+  const h = exprToLatex(end.hExpr ?? '0');
+  return `u_x(${at},t)+\\left(${h}\\right)u(${at},t)=${value}`;
 }
 
 function detectSymmetry(g: (x: number) => number, left: number, right: number): 'even' | 'odd' | null {
