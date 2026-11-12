@@ -287,7 +287,7 @@ function readCondition(line: string): Condition {
   if (args.length !== 2) throw new Error(`"${line}" should have two arguments, or three for u(x, y, 0).`);
   const [first, second] = args as [string, string];
   if (isSpatialName(first) && !isSpatialName(second)) {
-    return { role: 'initial', expr: toMath(right, [first]), timeExpr: toMath(second) };
+    return { role: 'initial', expr: keepUnknownCall(right), timeExpr: toMath(second) };
   }
   if (!isSpatialName(first) && isTimeName(second)) {
     return { role: 'boundary', expr: right, end: { kind: 'dirichlet', valueExpr: toMath(right), at: toMath(first) } };
@@ -296,6 +296,14 @@ function readCondition(line: string): Condition {
     return { role: 'point', expr: right, point: { xExpr: toMath(first), yExpr: toMath(second), uExpr: toMath(right) } };
   }
   throw new Error(`Could not tell whether "${line}" is initial data or a boundary condition.`);
+}
+
+/** `g(x)` is an arbitrary function of x. It is not the product g times x. */
+function keepUnknownCall(raw: string): string {
+  const match = raw.trim().match(/^([A-Za-z][A-Za-z0-9]*)\s*\(\s*x\s*\)$/);
+  const name = match?.[1];
+  if (name && !isBuiltInFunction(name)) return `${name}(x)`;
+  return toMath(raw);
 }
 
 function robinCoefficient(extra: string, at: string): string {
@@ -425,21 +433,31 @@ function collectParameters(
   overrides: Record<string, Partial<ParameterSpec>> | undefined,
 ): Record<string, ParameterSpec> {
   const found = new Set<string>();
+  const derivativeToken = new Set(['U', 'UX', 'UY', 'UT', 'UXX', 'UYY', 'UXY', 'UTT']);
   for (const expr of [zero, ...extra, ...conditions]) {
+    const prepared = shieldDerivatives(expr)
+      .replace(/\b(UX|UY|UT|UXX|UYY|UXY|UTT|U)\s*\([^)]*\)/g, '$1')
+      .split('=')[0] ?? '';
     try {
-      const prepared = expr.includes('u(') || expr.includes('u_') ? expr : expr;
-      parse(toMath(shieldDerivatives(prepared), FIELD)).traverse((node: MathNode, _path: string, parent: MathNode) => {
+      parse(toMath(prepared, FIELD)).traverse((node: MathNode, _path: string, parent: MathNode) => {
         if (node.type !== 'SymbolNode') return;
         const owner = parent as MathNode & { fn?: MathNode };
         if (parent?.type === 'FunctionNode' && owner.fn === node) return;
         const name = (node as MathNode & { name: string }).name;
-        if (!RESERVED.has(name) && !isBuiltInFunction(name)) found.add(name);
+        if (derivativeToken.has(name) || RESERVED.has(name) || isBuiltInFunction(name)) return;
+        found.add(name);
       });
     } catch {
-      for (const word of expr.matchAll(/\b[A-Za-z][A-Za-z0-9]*\b/g)) {
+      for (const word of prepared.matchAll(/\b[A-Za-z][A-Za-z0-9]*\b/g)) {
         const name = word[0] ?? '';
-        if (name && !RESERVED.has(name) && !isBuiltInFunction(name)) found.add(name);
+        if (name && !derivativeToken.has(name) && !RESERVED.has(name) && !isBuiltInFunction(name)) found.add(name);
       }
+    }
+  }
+  for (const expr of [zero, ...extra, ...conditions]) {
+    for (const match of expr.matchAll(/\b([A-Za-z][A-Za-z0-9]*)\s*\(\s*x\s*\)/g)) {
+      const name = match[1] ?? '';
+      if (name && !isBuiltInFunction(name)) found.delete(name);
     }
   }
   const assigned = new Map(bag.assignments.map((item) => [item.name, item.value]));

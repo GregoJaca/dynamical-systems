@@ -20,6 +20,7 @@ export interface PdeStore {
   x0: number;
   frame: PdeFrameId;
   partialN: number;
+  solving: boolean;
   boot: () => void;
   setView: (view: PdeView) => void;
   setTheme: (theme: ThemeMode) => void;
@@ -154,6 +155,7 @@ function toSnapshot(state: PdeStore): PdeSnapshot {
 let hashLock = 0;
 let hashTimer: ReturnType<typeof setTimeout> | null = null;
 let draftTimer: ReturnType<typeof setTimeout> | null = null;
+let solveToken = 0;
 let booted = false;
 
 function writeHash(state: PdeStore) {
@@ -217,7 +219,13 @@ function publishDraft(draft: string) {
     clearTimeout(draftTimer);
     draftTimer = null;
   }
-  applySolved(draft, compute(draft), true);
+  const token = ++solveToken;
+  usePdeStore.setState({ draft, solving: true, solution: null, error: null });
+  setTimeout(() => {
+    if (token !== solveToken) return;
+    applySolved(draft, compute(draft), true);
+    usePdeStore.setState({ solving: false });
+  }, 0);
 }
 
 function flushDraft() {
@@ -231,10 +239,16 @@ function flushDraft() {
 function scheduleDraft(draft: string) {
   usePdeStore.setState({ draft });
   if (draftTimer) clearTimeout(draftTimer);
+  const token = ++solveToken;
   draftTimer = setTimeout(() => {
     draftTimer = null;
     const latest = usePdeStore.getState().draft;
-    applySolved(latest, compute(latest), true);
+    usePdeStore.setState({ solving: true });
+    setTimeout(() => {
+      if (token !== solveToken) return;
+      applySolved(latest, compute(latest), true);
+      usePdeStore.setState({ solving: false });
+    }, 0);
   }, 120);
 }
 
@@ -252,6 +266,7 @@ export const usePdeStore = create<PdeStore>((set, get) => ({
   x0: initialCursor.x0,
   frame: initialFrame,
   partialN: restored ? keepPartial(restored.partialN, initialSolved.solution) : defaultPartial(initialSolved.solution),
+  solving: false,
 
   boot: () => {
     if (booted || typeof window === 'undefined') return;
@@ -350,8 +365,8 @@ export const usePdeStore = create<PdeStore>((set, get) => ({
   },
 
   loadExample: (example) => {
-    publishDraft(example.lines.join('\n'));
     set({ view: 'study' });
+    publishDraft(example.lines.join('\n'));
   },
 
   copyShareLink: () => {

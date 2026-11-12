@@ -158,7 +158,7 @@ export function applyFace(problem: CharProblem, built: BuiltChar, paramsIn: Reco
   ]
     .filter(Boolean)
     .join(' ');
-  const warnings = built.warnings.filter((warning) => !/foot|p\(t\)|numerically|RK45/i.test(warning));
+  const warnings = built.warnings.filter((warning) => !/foot|p\(t\)|numerically|RK45/i.test(warning) && !(transverse && /transverse/i.test(warning)));
   if (!transverse && !warnings.some((warning) => /transverse/i.test(warning))) {
     warnings.push('The initial line is not transverse.');
   }
@@ -166,6 +166,7 @@ export function applyFace(problem: CharProblem, built: BuiltChar, paramsIn: Reco
   return {
     ...built,
     evaluate,
+    fastField: Boolean(math),
     formulaLatex,
     generalLatex: formulaLatex,
     objects,
@@ -488,9 +489,9 @@ function isTransverse(problem: CharProblem, params: Record<string, number>, t0: 
     const tau = problem.vars === 'xy' ? 'y' : 't';
     for (const x of [-1, -0.25, 0.4, 1]) {
       const value = coeff(scopeAt(params, x, t0, tau));
-      if (!Number.isFinite(value) || Math.abs(value) < 1e-8) return false;
+      if (Number.isFinite(value) && Math.abs(value) > 1e-8) return true;
     }
-    return true;
+    return false;
   } catch {
     return true;
   }
@@ -1227,7 +1228,7 @@ function displayMath(expr: string): string {
 
 /** Expand a polynomial in x, t, y and combine like terms. Leave exp, sin, and log alone. */
 function expandPolynomial(expr: string): string {
-  if (/[a-zA-Z]{3,}/.test(expr)) return expr;
+  if (expr.length > 160 || /[a-zA-Z]{3,}/.test(expr)) return expr;
   try {
     const flat = rationalize(expr).toString();
     const combined = simplify(flat).toString();

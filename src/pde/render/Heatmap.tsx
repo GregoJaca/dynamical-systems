@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
 import type { FieldFrame, HeatSolution } from '../types';
-import { emphasis, viridis } from './colors';
+import { axisText, emphasis, viridis } from './colors';
 import { midY, sampleFrame, sampleMode } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
@@ -133,8 +133,8 @@ function paintAxes(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
   ctx.fillStyle = palette.text;
-  ctx.fillText(xName, width - MARGIN.right - 28, height - 4);
-  ctx.fillText(yName, 8, MARGIN.top + 12);
+  ctx.fillText(axisText(xName), width - MARGIN.right - 28, height - 4);
+  ctx.fillText(axisText(yName), 8, MARGIN.top + 12);
 }
 
 function equalBox(width: number, height: number, xMin: number, xMax: number, yMin: number, yMax: number) {

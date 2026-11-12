@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
 import type { FieldFrame, HeatSolution } from '../types';
-import { groupColor } from './colors';
+import { axisText, groupColor } from './colors';
 import { finiteExtent, profileSeries } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
@@ -64,6 +64,11 @@ export function Profile() {
       ctx.textBaseline = 'top';
       ctx.fillText(tick(frame.xMin), MARGIN.left, rect.height - MARGIN.bottom + 4);
       ctx.fillText(tick(frame.xMax), MARGIN.left + plotW, rect.height - MARGIN.bottom + 4);
+      ctx.fillStyle = palette.text;
+      ctx.fillText(axisText(frame.xName), MARGIN.left + plotW - 8, rect.height - 4);
+      ctx.textAlign = 'left';
+      ctx.fillText('u', 6, MARGIN.top + 10);
+      ctx.fillStyle = palette.muted;
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
       ctx.fillText(tick(yRange.max), MARGIN.left - 6, MARGIN.top);
@@ -87,6 +92,10 @@ export function Profile() {
         ctx.lineWidth = width;
         ctx.stroke();
       };
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
+      ctx.clip();
       if (series.partial) stroke(series.partial, groupColor('mode', theme), 1.6);
       if (series.selected) stroke(series.selected, groupColor('shock', theme), 2.4);
       stroke(series.u, palette.text, 2);
@@ -99,6 +108,7 @@ export function Profile() {
       ctx.lineTo(cursor, MARGIN.top + plotH);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.restore();
       const u0 = sampleAt(series.xs, series.u, x0);
       if (Number.isFinite(u0)) {
         ctx.fillStyle = groupColor('ray', theme);
@@ -153,16 +163,19 @@ function sliceExtent(heat: HeatSolution, frame: FieldFrame, t: number): { min: n
 }
 
 function frozenProfileRange(heat: HeatSolution, frame: FieldFrame): { min: number; max: number } {
-  const atMin = sliceExtent(heat, frame, frame.tMin);
-  const chosen = atMin.width < 1e-6 ? widerExtent(atMin, sliceExtent(heat, frame, frame.tMax)) : atMin;
-  return finiteExtent([chosen.min, chosen.max]);
-}
-
-function widerExtent(
-  first: { min: number; max: number; width: number },
-  second: { min: number; max: number; width: number },
-): { min: number; max: number; width: number } {
-  return second.width > first.width ? second : first;
+  let min = Infinity;
+  let max = -Infinity;
+  const steps = 8;
+  for (let index = 0; index <= steps; index += 1) {
+    const t = frame.tMin + ((frame.tMax - frame.tMin) * index) / steps;
+    const slice = sliceExtent(heat, frame, t);
+    if (!Number.isFinite(slice.min) || !Number.isFinite(slice.max)) continue;
+    if (slice.min < min) min = slice.min;
+    if (slice.max > max) max = slice.max;
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: -1, max: 1 };
+  const pad = Math.max((max - min) * 0.08, max === min ? Math.max(0.5, Math.abs(max) * 0.2) : 0);
+  return finiteExtent([min - pad, max + pad]);
 }
 
 function sampleAt(xs: number[], values: number[], x: number): number {

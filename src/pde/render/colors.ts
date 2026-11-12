@@ -14,6 +14,18 @@ const STOPS: Array<[number, [number, number, number]]> = [
   [1, [253, 231, 37]],
 ];
 
+/** Canvas text cannot draw TeX. These are the names that appear on axes. */
+export function axisText(name: string): string {
+  return name
+    .replace(/\\xi/g, 'ξ')
+    .replace(/\\tau/g, 'τ')
+    .replace(/\\pi/g, 'π')
+    .replace(/\\alpha/g, 'α')
+    .replace(/\\beta/g, 'β')
+    .replace(/\\theta/g, 'θ')
+    .replace(/[{}\\]/g, '');
+}
+
 export function viridis(t: number): [number, number, number] {
   const u = Math.min(1, Math.max(0, t));
   let index = 0;

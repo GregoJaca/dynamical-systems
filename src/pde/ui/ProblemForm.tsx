@@ -7,6 +7,11 @@ import { usePdeStore } from '../store';
 import type { CharProblem, EndCondition, HeatProblem, PdeProblem } from '../types';
 
 function safeLatex(raw: string): string {
+  const call = raw.trim().match(/^([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)$/);
+  if (call?.[1] && call[2] !== undefined && !['sin', 'cos', 'tan', 'exp', 'log', 'ln', 'sqrt', 'abs'].includes(call[1])) {
+    const args = call[2].split(',').map((part) => safeLatex(part.trim())).join(', ');
+    return `${call[1]}(${args})`;
+  }
   try {
     return exprToLatex(raw);
   } catch {
@@ -19,8 +24,11 @@ function endLatex(end: EndCondition): string {
   const value = safeLatex(end.valueExpr);
   if (end.kind === 'dirichlet') return `u(${at}, t) = ${value}`;
   if (end.kind === 'neumann') return `u_{x}(${at}, t) = ${value}`;
-  const h = safeLatex(end.hExpr ?? '1');
-  return `u_{x}(${at}, t) + ${h}\\, u(${at}, t) = ${value}`;
+  const rawH = (end.hExpr ?? '1').replace(/\s+/g, '');
+  const negative = rawH.startsWith('-');
+  const body = (negative ? rawH.slice(1) : rawH).replace(/^\((.*)\)$/, '$1');
+  const h = safeLatex(body);
+  return negative ? `u_{x}(${at}, t) - ${h}\\, u(${at}, t) = ${value}` : `u_{x}(${at}, t) + ${h}\\, u(${at}, t) = ${value}`;
 }
 
 function heatDomain(problem: HeatProblem): string {

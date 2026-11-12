@@ -74,7 +74,7 @@ function draw(
     if (hidden.includes(family.id)) return;
     ctx.strokeStyle = colors[index % colors.length] ?? '#3b528b';
     ctx.globalAlpha = selectedId && selectedId !== family.id ? 0.2 : 1;
-    ctx.lineWidth = selectedId === family.id ? 2.4 : 1.3;
+    ctx.lineWidth = selectedId === family.id ? 2.8 : 2;
     for (let level = -6; level <= 6; level += 1) {
       ctx.beginPath();
       if (family.slope === null) {
@@ -93,7 +93,8 @@ function draw(
   ctx.globalAlpha = 1;
   ctx.fillStyle = palette.text;
   ctx.font = '13px "Source Sans 3", sans-serif';
-  ctx.fillText(`${type}    Δ = ${Math.round(delta * 1000) / 1000}`, MARGIN.left, 12);
+  ctx.fillText(type, MARGIN.left, 12);
+  void delta;
   ctx.fillText('x', width - MARGIN.right - 8, height - 8);
   ctx.fillText('y', 8, MARGIN.top + 4);
 }

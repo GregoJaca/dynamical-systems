@@ -204,6 +204,8 @@ export interface HeatSolution {
   features: PdeTag[];
   warnings: string[];
   spatial: 'x' | 'xy' | 'radial';
+  /** False when the data is an unspecified function, so there is a formula and no graph. */
+  showGraph?: boolean;
   boundaryCurves: Polyline[];
   steadyLatex?: string;
   steady?: (x: number, y?: number) => number;
@@ -242,6 +244,8 @@ export interface CharSolution {
   features: PdeTag[];
   warnings: string[];
   vars: 'xt' | 'xy';
+  /** The field can be sampled on a grid. Otherwise the picture is the curves only. */
+  fastField?: boolean;
   shock?: { points: number[][]; latex: string; speedLatex: string; laxLatex: string };
   envelope?: { points: number[][]; latex: string };
   rarefactionLatex?: string;

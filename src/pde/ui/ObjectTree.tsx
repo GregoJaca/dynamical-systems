@@ -13,14 +13,30 @@ export function ObjectTree() {
   const select = usePdeStore((state) => state.select);
   const hover = usePdeStore((state) => state.hover);
   const setPartialN = usePdeStore((state) => state.setPartialN);
+  const frameId = usePdeStore((state) => state.frame);
+  const setFrame = usePdeStore((state) => state.setFrame);
 
   if (!solution) return <p className="status">Nothing to show yet.</p>;
+  const simplified = solution.frames.find((frame) => frame.id === 'simplified');
+  const dimensionless = frameId === 'simplified';
 
   const modeCount = solution.family === 'heat' ? solution.modes.length : 0;
 
   return (
     <div className="viz-list">
       <TimeControl />
+      {simplified ? (
+        <div>
+          <button type="button" className={dimensionless ? 'real-button on' : 'real-button'} onClick={() => setFrame(dimensionless ? 'original' : 'simplified')}>
+            Dimensionless
+          </button>
+          {dimensionless && simplified.mapLatex ? (
+            <p className="object-text">
+              <Katex tex={simplified.mapLatex} />
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {solution.objects.map((object) => {
         const shown = !hidden.includes(object.id);
         const color = groupColor(object.group, theme);

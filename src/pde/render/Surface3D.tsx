@@ -1,11 +1,11 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Line, OrbitControls } from '@react-three/drei';
+import { Html, Line, OrbitControls } from '@react-three/drei';
 import { BufferAttribute, BufferGeometry, Color, DoubleSide, NoToneMapping } from 'three';
 import { Katex } from '../../ui/Katex';
 import { parseUserNumber, rationalLabel } from '../../ui/format';
 import type { CharSolution, FieldFrame, HeatSolution, PdeSolution } from '../types';
-import { emphasis, groupColor, viridis } from './colors';
+import { axisText, emphasis, groupColor, viridis } from './colors';
 import { charGraphics, midY, sampleFrame } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
@@ -271,11 +271,33 @@ export function Surface3D() {
               <sphereGeometry args={[0.045, 18, 18]} />
               <meshStandardMaterial color="#f0b429" />
             </mesh>
+            <AxisFrame xName={axisText(frame.xName)} tName={axisText(frame.tName)} ink={theme === 'dark' ? '#f3f1ec' : '#1c1917'} />
             <OrbitControls enableDamping={false} />
           </Canvas>
         </SurfaceBoundary>
       </div>
       <TimeSlider frame={frame} value={t0} onChange={setT0} />
+    </>
+  );
+}
+
+function AxisFrame({ xName, tName, ink }: { xName: string; tName: string; ink: string }) {
+  const origin: [number, number, number] = [-1, -0.52, -0.75];
+  const style = { color: ink, fontSize: 12, fontFamily: '"Source Sans 3", sans-serif' };
+  return (
+    <>
+      <Line points={[origin, [1.08, -0.52, -0.75]]} color={ink} lineWidth={1.2} />
+      <Line points={[origin, [-1, 0.62, -0.75]]} color={ink} lineWidth={1.2} />
+      <Line points={[origin, [-1, -0.52, 0.82]]} color={ink} lineWidth={1.2} />
+      <Html position={[0.72, -0.38, -0.75]} center>
+        <span style={style}>{xName}</span>
+      </Html>
+      <Html position={[-0.82, 0.7, -0.75]} center>
+        <span style={style}>u</span>
+      </Html>
+      <Html position={[-0.82, -0.38, 0.55]} center>
+        <span style={style}>{tName}</span>
+      </Html>
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { solveHeat } from '../src/pde/heat/solveHeat';
 import { parseProblem } from '../src/pde/parse';
 
 describe('PDE problem parser', () => {
@@ -35,6 +36,29 @@ describe('PDE problem parser', () => {
     expect(robin.domain.right.kind).toBe('robin');
     expect(robin.domain.right.hExpr).toBe('h');
     expect(robin.parameters.h?.value).toBe(2);
+  });
+
+  it('keeps an unspecified initial function and does not invent a slope parameter', () => {
+    const problem = parseProblem([
+      'ut - 3 uxx = 0',
+      '0 < x < pi',
+      'u(x,0) = g(x)',
+      'ux(0,t) - alpha u(0,t) = 0',
+      't > 0',
+      'ux(pi,0) = 0',
+    ]);
+    expect(problem.family).toBe('heat');
+    if (problem.family !== 'heat' || problem.domain.kind !== 'interval') throw new Error('expected an interval');
+    expect(problem.initialExpr).toBe('g(x)');
+    expect(problem.parameters.g).toBeUndefined();
+    expect(problem.parameters.ux).toBeUndefined();
+    expect(problem.parameters.alpha).toBeTruthy();
+    expect(problem.domain.left.kind).toBe('robin');
+    if (problem.domain.left.kind === 'robin') expect(problem.domain.left.hExpr.replace(/[()\s]/g, '')).toBe('-alpha');
+    expect(problem.domain.right.kind).toBe('neumann');
+    const solution = solveHeat(problem);
+    expect(solution.showGraph).toBe(false);
+    expect(solution.formulaLatex).toContain('g(x)');
   });
 
   it('reads a linear transport equation and an eikonal point problem', () => {

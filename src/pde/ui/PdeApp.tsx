@@ -39,34 +39,23 @@ function clampPanel(total: number, height: number) {
 function Picture() {
   const solution = usePdeStore((state) => state.solution);
   const error = usePdeStore((state) => state.error);
+  const solving = usePdeStore((state) => state.solving);
   const frameId = usePdeStore((state) => state.frame);
-  const setFrame = usePdeStore((state) => state.setFrame);
+  if (solving && !solution) return <p className="status">Solving…</p>;
   if (!solution) return <p className="status">{error ?? 'The picture appears when the problem solves.'}</p>;
-  const original = solution.frames.find((frame) => frame.id === 'original');
-  const simplified = solution.frames.find((frame) => frame.id === 'simplified');
-  const both = Boolean(original && simplified);
-  const mapLatex = simplified?.mapLatex || original?.mapLatex;
+  if (solution.family === 'heat' && solution.showGraph === false) {
+    return (
+      <div className="portrait-page">
+        <p className="object-text">
+          <Katex display tex={solution.formulaLatex} />
+        </p>
+      </div>
+    );
+  }
   const active = activeFrame(solution, frameId);
 
   return (
     <div className="portrait-page">
-      {both && original && simplified && (
-        <div>
-          <div className="button-row">
-            <button type="button" className={frameId === 'original' ? 'real-button on' : 'real-button'} onClick={() => setFrame('original')}>
-              {original.name}
-            </button>
-            <button type="button" className={frameId === 'simplified' ? 'real-button on' : 'real-button'} onClick={() => setFrame('simplified')}>
-              {simplified.name}
-            </button>
-          </div>
-          {mapLatex ? (
-            <p className="object-text">
-              <Katex tex={mapLatex} />
-            </p>
-          ) : null}
-        </div>
-      )}
       <div className="portrait-primary">
         {solution.family === 'heat' ? <Heatmap /> : solution.family === 'classify' ? <ClassPlane /> : <CharPlane />}
       </div>

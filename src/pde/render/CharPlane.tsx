@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { PALETTE } from '../../core/palette';
 import { Katex } from '../../ui/Katex';
 import type { CharSolution, FieldFrame } from '../types';
-import { emphasis, groupColor, viridis } from './colors';
+import { axisText, emphasis, groupColor, viridis, viridisCss } from './colors';
 import { charGraphics, sampleFrame, type CurveLayer } from './exportView';
 import { activeFrame, usePdeStore } from '../store';
 
@@ -48,7 +48,11 @@ export function CharPlane() {
   const hits = useRef<Array<{ id: string; tex: string; points: Array<[number, number]>; region: boolean }>>([]);
   const char = solution?.family === 'characteristics' ? solution : null;
   const frame = activeFrame(solution, frameId);
-  const field = useMemo(() => (frame ? sampleCharField(frame) : null), [frame]);
+  const field = useMemo(() => {
+    if (!frame) return null;
+    if (!char?.fastField) return { values: new Float64Array(0), min: Number.NaN, max: Number.NaN };
+    return sampleCharField(frame);
+  }, [frame, char?.fastField]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -222,18 +226,37 @@ function drawPlane(
     if (!mark.draw || curve.points.length < 2) continue;
     const pixels: Array<[number, number]> = [];
     ctx.globalAlpha = mark.alpha;
-    ctx.lineWidth = strokeWidth(curve.kind) * mark.scale;
-    ctx.strokeStyle = strokeColor(curve.kind, theme, palette.text);
+    ctx.lineWidth = (field.values.length === 0 && curve.kind === 'curve' ? 3.4 : strokeWidth(curve.kind)) * mark.scale;
     ctx.setLineDash(curve.kind === 'envelope' ? [7, 5] : []);
-    ctx.beginPath();
-    curve.points.forEach((point, index) => {
-      const px = xOf(point[0]);
-      const py = tOf(point[1]);
-      pixels.push([px, py]);
-      if (index === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
-    ctx.stroke();
+    const shade = curve.values?.filter((value) => Number.isFinite(value)) ?? [];
+    const shadeMin = shade.length ? Math.min(...shade) : 0;
+    const shadeMax = shade.length ? Math.max(...shade) : 1;
+    if (field.values.length > 0 || curve.kind !== 'curve' || shadeMax <= shadeMin) {
+      ctx.strokeStyle = strokeColor(curve.kind, theme, palette.text);
+      ctx.beginPath();
+      curve.points.forEach((point, index) => {
+        const px = xOf(point[0]);
+        const py = tOf(point[1]);
+        pixels.push([px, py]);
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+    } else {
+      curve.points.forEach((point, index) => {
+        const px = xOf(point[0]);
+        const py = tOf(point[1]);
+        pixels.push([px, py]);
+        if (index === 0) return;
+        const previous = curve.points[index - 1]!;
+        const value = curve.values?.[index] ?? curve.values?.[index - 1];
+        ctx.beginPath();
+        ctx.moveTo(xOf(previous[0]), tOf(previous[1]));
+        ctx.lineTo(px, py);
+        ctx.strokeStyle = value === undefined ? palette.text : viridisCss((value - shadeMin) / (shadeMax - shadeMin));
+        ctx.stroke();
+      });
+    }
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     recorded.push({ id: curve.id, tex: curve.latex, points: pixels, region: false });
@@ -263,8 +286,8 @@ function drawPlane(
   ctx.fillText(tick(frame.tMin), MARGIN.left - 6, height - MARGIN.bottom);
   ctx.textAlign = 'left';
   ctx.fillStyle = palette.text;
-  ctx.fillText(frame.xName, width - MARGIN.right - 16, height - 4);
-  ctx.fillText(frame.tName, 8, MARGIN.top + 4);
+  ctx.fillText(axisText(frame.xName), width - MARGIN.right - 16, height - 4);
+  ctx.fillText(axisText(frame.tName), 8, MARGIN.top + 4);
   if (fieldMark.draw && Number.isFinite(field.min) && Number.isFinite(field.max)) {
     paintColorbar(ctx, field.min, field.max, MARGIN.left + plotW + 10, MARGIN.top, 8, plotH, palette.muted, fieldMark.alpha);
   }

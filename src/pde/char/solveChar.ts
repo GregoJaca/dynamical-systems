@@ -26,6 +26,7 @@ export interface BuiltChar {
   domainX: [number, number];
   domainT: [number, number];
   residualKind: 'linear' | 'burgers' | 'eikonal';
+  fastField?: boolean;
   /** Centre to avoid when differencing a point-source eikonal solution. */
   singularX?: number;
   singularT?: number;
@@ -77,6 +78,7 @@ function finish(problem: CharProblem, built: BuiltChar): CharSolution {
     features,
     warnings: built.warnings,
     vars: problem.vars,
+    fastField: built.fastField === true,
     ...(built.shock ? { shock: built.shock } : {}),
     ...(built.envelope ? { envelope: built.envelope } : {}),
     ...(built.rarefactionLatex ? { rarefactionLatex: built.rarefactionLatex } : {}),

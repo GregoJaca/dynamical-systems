@@ -118,7 +118,7 @@ function pack(
   speedLatex: string,
   b: Scalar,
 ): BuiltChar {
-  const transverse = samples(domain.x[0], domain.x[1], 5).every((x) => Math.abs(b(x, data.t0)) > 1e-8);
+  const transverse = samples(domain.x[0], domain.x[1], 5).some((x) => Math.abs(b(x, data.t0)) > 1e-8);
   const dataLatex = `u(x,${texNum(data.t0)})=${tex(data.gExpr)}`;
   const objects: PdeObject[] = [
     { id: 'characteristics', label: 'Characteristics', formulaLatex: speedLatex, group: 'characteristic', defaultOn: true },

@@ -3,10 +3,13 @@ import { Katex } from '../../ui/Katex';
 import { PDE_EXAMPLES } from '../examples/corpus';
 import { usePdeStore } from '../store';
 
+const GREEK = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'theta', 'lambda', 'mu', 'nu', 'xi', 'pi', 'rho', 'sigma', 'tau', 'phi', 'psi', 'omega'];
+
 function previewTex(lines: string[]): string {
   const equation = lines.find((line) => line.includes('=')) ?? lines[0] ?? '';
-  return equation
+  let tex = equation
     .replaceAll('u_xx', 'u_{xx}')
+    .replaceAll('uxx', 'u_{xx}')
     .replaceAll('u_yy', 'u_{yy}')
     .replaceAll('u_xy', 'u_{xy}')
     .replaceAll('u_tt', 'u_{tt}')
@@ -14,6 +17,8 @@ function previewTex(lines: string[]): string {
     .replaceAll('u_y', 'u_{y}')
     .replaceAll('u_t', 'u_{t}')
     .replaceAll('*', ' ');
+  for (const name of GREEK) tex = tex.replace(new RegExp(`\\b${name}\\b`, 'g'), `\\${name}`);
+  return tex;
 }
 
 export function Examples() {

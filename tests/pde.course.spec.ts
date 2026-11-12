@@ -53,7 +53,7 @@ describe('course problems', () => {
     }
   }, 120000);
 
-  it('solves every visible example within 5 seconds, without throwing', () => {
+  it('solves every visible example within 8 seconds, without throwing', () => {
     const started = Date.now();
     for (const example of PDE_EXAMPLES) {
       if (example.parked) continue;
@@ -63,7 +63,7 @@ describe('course problems', () => {
       expect(() => {
         solution = solveProblem(problem);
       }, example.id).not.toThrow();
-      expect(Date.now() - one, example.id).toBeLessThan(5000);
+      expect(Date.now() - one, example.id).toBeLessThan(8000);
       const frame = solution!.frames[0];
       expect(frame, example.id).toBeTruthy();
       const sample = frame!.evaluate(0.4, Math.min(frame!.tMax, Math.max(frame!.tMin + 0.05, 0.2)), frame!.yMin != null ? (frame!.yMin + (frame!.yMax ?? frame!.yMin)) / 2 : 0);

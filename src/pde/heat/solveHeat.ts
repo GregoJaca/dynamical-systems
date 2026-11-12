@@ -4,6 +4,7 @@
  * when the unknown or the coordinates actually change.
  */
 
+import { isBuiltInFunction } from '../../input/expression';
 import { diracCenter, evalMath, exprToLatex, makeField, mentions, toMath } from '../expr';
 import type {
   EndCondition,
@@ -160,6 +161,8 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
     return numeric;
   }
   if (ends.left === 'robin' || ends.right === 'robin') used.add('robin');
+  const symbol = plainInitial(problem.initialExpr, problem.parameters);
+  if (symbol) return symbolicData(problem, symbol, ends, k, length, left, domain, notes, used, warnings);
 
   const sourceValue = bundle.sourceConstant ?? 0;
   const lift = buildLift(k, left, right, length, sourceValue, bundle.sourceConstant !== null, leftEnd, rightEnd, vInitial);
@@ -244,7 +247,13 @@ function solveInterval(problem: HeatProblem, bundle: Bundle): HeatSolution {
   const finiteExpansion = projected.closed && sourceProjected.closed && !driven && rows.every((row) => row.exact);
   const terms = rows.map((row) => toModeTerm(row, k, length));
   const lambda1 = dominantLambda(rows);
-  const tMax = viewTime(lambda1);
+  const forcingRate = rows.reduce<number | undefined>((slowest, row) => {
+    if (row.forcingC == null || !(row.forcingC < -1e-8)) return slowest;
+    const rate = -row.forcingC;
+    return slowest === undefined ? rate : Math.min(slowest, rate);
+  }, undefined);
+  const rates = [lambda1, forcingRate].filter((rate): rate is number => rate !== undefined && rate > 0);
+  const tMax = viewTime(rates.length > 0 ? Math.min(...rates) : undefined);
   const formula = seriesLatex(terms, lift, transformed, alpha, beta, display, finiteExpansion);
   const worked = workedSeparation(terms, display, lift, finiteExpansion);
   const nondim = sourceIsZero && bundle.sourceConstant === 0 && shouldNondimensionalize(k, left, right);
@@ -1170,6 +1179,29 @@ function symbolicSum(display: SeriesDisplay): string {
   return `a_0+\\sum_{n=1}^{\\infty} e^{-${decay} t}\\left(a_n\\cos(${angle})+b_n\\sin(${angle})\\right)`;
 }
 
+function coefficientClause(display: SeriesDisplay, symbol: string): string {
+  const a = placeLatex(display.left);
+  const b = placeLatex(display.left + display.length);
+  const data = `${symbol}(x)`;
+  if (display.kind === 'nn') return `c_0&=${oneOverL(display.length)}\\int_{${a}}^{${b}} ${data}\\,dx`;
+  if (display.kind === 'periodic') return `a_0&=${oneOverL(display.length)}\\int_{${a}}^{${b}} ${data}\\,dx`;
+  return `c_n&=\\frac{\\int_{${a}}^{${b}} ${data}\\,\\phi_n(x)\\,dx}{\\int_{${a}}^{${b}}\\phi_n(x)^2\\,dx}`;
+}
+
+function symbolicFormula(display: SeriesDisplay, symbol: string): string {
+  const lines = [`u(x,t)&=${symbolicSum(display)}`];
+  if (display.kind === 'robin-neumann' || display.kind === 'neumann-robin') {
+    const root = robinRoot(display);
+    lines.push(`\\phi_n(x)&=${robinPhiBody(display)}`);
+    lines.push(`\\mu_n&=${root.mu},\\quad ${root.eq}`);
+  } else {
+    const tail = seriesTail(display);
+    if (tail) lines.push(tail);
+  }
+  lines.push(coefficientClause(display, symbol));
+  return nameIn(`\\begin{aligned}${lines.join('\\\\')}\\end{aligned}`, symbol);
+}
+
 function seriesTail(display: SeriesDisplay): string {
   if (display.kind === 'robin-neumann' || display.kind === 'neumann-robin') {
     const root = robinRoot(display);
@@ -1527,9 +1559,47 @@ function dominantLambda(rows: Array<{ mode: SpectralMode; a0: number }>): number
   return Math.min(...positive.map((row) => row.mode.lambda));
 }
 
+function plainInitial(expr: string, parameters: HeatProblem['parameters']): string | null {
+  const name = expr.trim().match(/^([A-Za-z][A-Za-z0-9]*)\(x\)$/)?.[1];
+  if (!name || isBuiltInFunction(name) || parameters[name]) return null;
+  return name;
+}
+
+function nameIn(latex: string, name: string): string {
+  if (name === 'g') return latex;
+  return latex.replaceAll('g(x)', `${name}(x)`).replaceAll(' g', ` ${name}`);
+}
+
+function symbolicData(
+  problem: HeatProblem,
+  symbol: string,
+  ends: IntervalEnds,
+  k: number,
+  length: number,
+  left: number,
+  domain: Extract<HeatProblem['domain'], { kind: 'interval' }>,
+  notes: NoteBlock[],
+  used: Set<PdeTag>,
+  warnings: string[],
+): HeatSolution {
+  const display = makeDisplay(ends, k, length, left, domain);
+  const formula = symbolicFormula(display, symbol);
+  const frames: FieldFrame[] = [];
+  const solution = blank(problem, 'separation', true, formula, frames, [], notes, warnings, 'x');
+  solution.showGraph = false;
+  solution.workedLatex = nameIn(infiniteWorked(display), symbol);
+  solution.objects = [
+    { id: 'surface', label: 'Solution', formulaLatex: formula, group: 'field', defaultOn: true },
+    { id: 'boundary', label: 'Boundary data', formulaLatex: boundaryLatex(domain), group: 'boundary', defaultOn: false },
+  ];
+  solution.features = orderFeatures(used);
+  return solution;
+}
+
+/** Long enough for the slowest mode to fall to about 5% of its start, and not a fixed unit interval. */
 function viewTime(lambda: number | undefined): number {
   if (lambda === undefined || !(lambda > 0)) return 1;
-  return Math.min(5, Math.max(0.2, 1.2 / lambda));
+  return Math.min(12, Math.max(0.35, Math.log(20) / lambda));
 }
 
 function longTime(rows: RowDraft[], lambda1: number | undefined): HeatSolution['longTime'] | undefined {
